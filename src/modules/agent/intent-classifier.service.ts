@@ -49,6 +49,10 @@ export class IntentClassifier {
         openAIApiKey: apiKey,
         configuration: {
           baseURL: baseURL,
+          defaultHeaders: {
+            'HTTP-Referer': 'http://localhost:3000',
+            'X-Title': 'Pro-Agent PPT Generator',
+          },
         },
       });
       this.model = baseModel.withStructuredOutput(IntentSchema);

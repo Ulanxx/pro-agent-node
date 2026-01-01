@@ -5,7 +5,6 @@ import {
   TaskExecutionResult,
   ReflectionResult,
 } from '../../../core/dsl/task.types';
-import { PptHtmlDocument } from '../../../core/dsl/types';
 
 /**
  * 自主规划 Agent 状态定义

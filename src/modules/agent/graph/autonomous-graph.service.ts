@@ -6,7 +6,10 @@ import { TaskExecutorService } from '../executor/task-executor.service';
 import { ReflectorService } from '../reflector/reflector.service';
 import { TaskListService } from '../task-list/task-list.service';
 import { SocketGateway } from '../../socket/socket.gateway';
-import { AutonomousAgentState, AutonomousAgentStateType } from './autonomous-state';
+import {
+  AutonomousAgentState,
+  AutonomousAgentStateType,
+} from './autonomous-state';
 import { Task, TaskStatus } from '../../../core/dsl/task.types';
 import { PptHtmlDocument } from '../../../core/dsl/types';
 
@@ -104,7 +107,15 @@ export class AutonomousGraphService {
    */
   private decideNextStep(state: AutonomousAgentStateType): 'continue' | 'end' {
     const reflection = state.reflection;
+    const currentTask = state.currentTask;
 
+    // 如果没有当前任务，直接结束
+    if (!currentTask) {
+      this.logger.log('No current task, ending execution');
+      return 'end';
+    }
+
+    // 如果反思需要新任务且应该继续，则继续
     if (reflection?.needsNewTasks && reflection?.shouldContinue) {
       return 'continue';
     }
@@ -123,7 +134,49 @@ export class AutonomousGraphService {
       }
     }
 
+    // 如果没有待执行的任务，结束执行
+    this.logger.log('No pending tasks, ending execution');
     return 'end';
+  }
+
+  /**
+   * 检查任务的依赖是否满足
+   */
+  private checkDependenciesSatisfied(task: Task, allTasks: Task[]): boolean {
+    for (const dep of task.dependencies) {
+      const depTask = allTasks.find((t) => t.id === dep.taskId);
+      if (!depTask) {
+        this.logger.warn(`Dependency task ${dep.taskId} not found`);
+        return false;
+      }
+
+      // 根据条件检查依赖
+      switch (dep.condition) {
+        case 'success':
+          if (depTask.status !== TaskStatus.COMPLETED) {
+            return false;
+          }
+          break;
+        case 'any':
+          if (
+            ![
+              TaskStatus.COMPLETED,
+              TaskStatus.FAILED,
+              TaskStatus.SKIPPED,
+            ].includes(depTask.status)
+          ) {
+            return false;
+          }
+          break;
+        case 'all':
+        default:
+          if (depTask.status !== TaskStatus.COMPLETED) {
+            return false;
+          }
+          break;
+      }
+    }
+    return true;
   }
 
   // --- Nodes ---
@@ -332,6 +385,8 @@ export class AutonomousGraphService {
 
       // 如果需要新任务，添加到任务列表
       if (reflection.needsNewTasks && reflection.newTaskSuggestions) {
+        const newTaskIds: string[] = [];
+        
         for (const taskSuggestion of reflection.newTaskSuggestions) {
           const newTask: Task = {
             id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -349,6 +404,19 @@ export class AutonomousGraphService {
           };
 
           taskList.tasks.push(newTask);
+          newTaskIds.push(newTask.id);
+        }
+
+        // 检查新任务的依赖是否满足，如果满足则设置为 READY
+        for (const taskId of newTaskIds) {
+          const task = taskList.tasks.find(t => t.id === taskId);
+          if (task && task.status === TaskStatus.PENDING) {
+            const dependenciesSatisfied = this.checkDependenciesSatisfied(task, taskList.tasks);
+            if (dependenciesSatisfied) {
+              task.status = TaskStatus.READY;
+              this.logger.log(`New task ${taskId} is now READY (dependencies satisfied)`);
+            }
+          }
         }
 
         // 保存更新后的任务列表

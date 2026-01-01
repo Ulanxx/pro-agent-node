@@ -1,12 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
-import { Task, TaskList, QualityCheckResult, ReflectionResult } from '../../../core/dsl/task.types';
+import {
+  Task,
+  TaskList,
+  QualityCheckResult,
+  ReflectionResult,
+} from '../../../core/dsl/task.types';
 
 @Injectable()
 export class ReflectorService {
   private readonly logger = new Logger(ReflectorService.name);
-  private qualityModel: { invoke: (p: any) => Promise<QualityCheckResult> } | undefined;
+  private qualityModel:
+    | { invoke: (p: any) => Promise<QualityCheckResult> }
+    | undefined;
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -21,6 +28,10 @@ export class ReflectorService {
         openAIApiKey: apiKey,
         configuration: {
           baseURL,
+          defaultHeaders: {
+            'HTTP-Referer': 'http://localhost:3000',
+            'X-Title': 'Pro-Agent PPT Generator',
+          },
         },
       });
 
@@ -35,7 +46,9 @@ export class ReflectorService {
         }),
       );
     } else {
-      this.logger.warn('OPENAI_API_KEY not found, reflection will use fallback logic');
+      this.logger.warn(
+        'OPENAI_API_KEY not found, reflection will use fallback logic',
+      );
     }
   }
 
@@ -65,10 +78,7 @@ export class ReflectorService {
     }
 
     // 2. 分析结果质量
-    const qualityCheck = await this.checkResultQuality(
-      completedTask,
-      context,
-    );
+    const qualityCheck = await this.checkResultQuality(completedTask, context);
 
     this.logger.log(
       `Quality check result: score=${qualityCheck.score}, needsRefinement=${qualityCheck.needsRefinement}`,
@@ -86,9 +96,7 @@ export class ReflectorService {
               taskId: completedTask.id,
               issues: qualityCheck.issues,
             },
-            dependencies: [
-              { taskId: completedTask.id, condition: 'success' },
-            ],
+            dependencies: [{ taskId: completedTask.id, condition: 'success' }],
             priority: 8,
             status: 'pending' as any,
             metadata: {
@@ -218,9 +226,7 @@ export class ReflectorService {
             parameters: {
               query: `${courseConfig.targetAudience} 教学方法 最佳实践`,
             },
-            dependencies: [
-              { taskId: completedTask.id, condition: 'success' },
-            ],
+            dependencies: [{ taskId: completedTask.id, condition: 'success' }],
             priority: 5,
             status: 'pending' as any,
             metadata: {
@@ -243,9 +249,7 @@ export class ReflectorService {
               taskId: completedTask.id,
               criteria: 'complexity',
             },
-            dependencies: [
-              { taskId: completedTask.id, condition: 'success' },
-            ],
+            dependencies: [{ taskId: completedTask.id, condition: 'success' }],
             priority: 3,
             status: 'pending' as any,
             metadata: {
@@ -267,9 +271,7 @@ export class ReflectorService {
             parameters: {
               query: `${context.topic} 相关信息`,
             },
-            dependencies: [
-              { taskId: completedTask.id, condition: 'success' },
-            ],
+            dependencies: [{ taskId: completedTask.id, condition: 'success' }],
             priority: 5,
             status: 'pending' as any,
             metadata: {

@@ -7,12 +7,29 @@ export interface SearchResult {
 }
 
 interface BochaSearchResponse {
+  code: number;
+  log_id: string;
+  msg: string | null;
   data: {
-    results: Array<{
-      title: string;
-      url: string;
-      content: string;
-    }>;
+    _type: string;
+    queryContext: {
+      originalQuery: string;
+    };
+    webPages: {
+      webSearchUrl: string;
+      totalEstimatedMatches: number;
+      value: Array<{
+        id: string;
+        name: string;
+        url: string;
+        displayUrl: string;
+        snippet: string;
+        summary: string;
+        siteName: string;
+        datePublished: string;
+        dateLastCrawled: string;
+      }>;
+    };
   };
 }
 
@@ -35,7 +52,7 @@ export class WebSearchTool {
 
     if (this.apiKey) {
       try {
-        const response = await fetch('https://api.bochaai.com/v1/web-search', {
+        const response = await fetch('https://api.bocha.cn/v1/web-search', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
@@ -43,18 +60,25 @@ export class WebSearchTool {
           },
           body: JSON.stringify({
             query,
-            freshness: 'oneYear',
+            freshness: 'noLimit',
             summary: true,
             count: 8,
           }),
         });
 
         const result = (await response.json()) as BochaSearchResponse;
-        const results = result.data?.results || [];
-        return results.map((r) => ({
-          title: r.title,
+        
+        // 添加详细日志用于调试
+        this.logger.log(`Bocha API response status: ${response.status}`);
+        this.logger.log(`Bocha API response: ${JSON.stringify(result)}`);
+        
+        const webPages = result.data?.webPages?.value || [];
+        this.logger.log(`Extracted ${webPages.length} results from API response`);
+        
+        return webPages.map((r) => ({
+          title: r.name,
           url: r.url,
-          snippet: r.content,
+          snippet: r.summary || r.snippet,
         }));
       } catch (error: unknown) {
         const errorMsg = error instanceof Error ? error.message : String(error);
