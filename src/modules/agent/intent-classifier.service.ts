@@ -6,6 +6,7 @@ import { Message } from '../../shared/types/message';
 export enum UserIntent {
   INITIAL = 'INITIAL',
   REFINEMENT = 'REFINEMENT',
+  IRRELEVANT = 'IRRELEVANT',
 }
 
 export enum TargetStage {
@@ -85,10 +86,21 @@ export class IntentClassifier {
 5. THEME: 视觉主题和风格
 6. SLIDES: 最终 HTML 幻灯片生成
 
-你的任务是判断用户的最新消息是一个新请求 (INITIAL)，还是对已有产物的修改意见 (REFINEMENT)。
-如果是 REFINEMENT，请识别最适合开始优化的阶段。**如果修改意见涉及多个阶段，请始终选择最靠前（EARLIEST）的阶段，以确保级联更新能够保持内容的一致性。**
+你的任务是判断用户的最新消息属于以下哪种意图：
+1. INITIAL: 新的 PPT 生成请求
+2. REFINEMENT: 对已有产物的修改意见
+3. IRRELEVANT: 与 PPT 生成完全无关的内容（如问候、闲聊、询问其他问题等）
+
+**重要规则：**
+- 如果用户消息只是简单的问候（如"你好"、"嗨"等），没有任何 PPT 相关内容，必须归类为 IRRELEVANT
+- 如果用户消息是闲聊、询问天气、时间等与 PPT 生成无关的内容，归类为 IRRELEVANT
+- 如果用户消息包含任何 PPT 相关关键词或意图（如"做 PPT"、"幻灯片"、"演示文稿"、"课程"、"教学"等），归类为 INITIAL 或 REFINEMENT
+- 如果是 REFINEMENT，请识别最适合开始优化的阶段。**如果修改意见涉及多个阶段，请始终选择最靠前（EARLIEST）的阶段，以确保级联更新能够保持内容的一致性。**
 
 示例：
+- "你好" -> IRRELEVANT
+- "嗨" -> IRRELEVANT
+- "今天天气怎么样" -> IRRELEVANT
 - "帮我做一个关于 AI 的 PPT" -> INITIAL
 - "给幻灯片增加更多图片" -> REFINEMENT (SLIDES)
 - "大纲太复杂了，简化一下" -> REFINEMENT (VIDEO_OUTLINE)

@@ -1,12 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
-import { JobStartMetaDataPayload } from 'src/shared/types/process';
+import { AGENT_PROMPTS } from './prompts/config';
+import { TargetStage } from './intent-classifier.service';
 import {
-  AnyGenDocument,
-  AnyGenDocumentSchema,
-  DocumentPlan,
-  DocumentPlanSchema,
   CourseConfig,
   CourseConfigSchema,
   VideoOutline,
@@ -18,16 +15,6 @@ import {
   SlideHtml,
   SlideHtmlSchema,
 } from '../../core/dsl/types';
-import {
-  PLANNING_PROMPT,
-  CONTENT_GENERATION_PROMPT,
-  ANALYSIS_PROMPT,
-  COURSE_CONFIG_PROMPT,
-  VIDEO_OUTLINE_PROMPT,
-  SLIDE_SCRIPT_PROMPT,
-  THEME_GENERATION_PROMPT,
-  SLIDE_PAGE_GENERATION_PROMPT,
-} from './prompts/planning.prompt';
 import { WebSearchTool, SearchResult } from './tools/web-search.tool';
 
 type StatusUpdateCallback = (
@@ -50,12 +37,6 @@ type StatusUpdateCallback = (
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
   private analysisModel: ChatOpenAI | undefined;
-  private planningModel:
-    | { invoke: (p: any) => Promise<DocumentPlan> }
-    | undefined;
-  private contentModel:
-    | { invoke: (p: any) => Promise<AnyGenDocument> }
-    | undefined;
   private courseConfigModel:
     | { invoke: (p: any) => Promise<CourseConfig> }
     | undefined;
@@ -88,8 +69,6 @@ export class AgentService {
         },
       });
       this.analysisModel = baseModel;
-      this.planningModel = baseModel.withStructuredOutput(DocumentPlanSchema);
-      this.contentModel = baseModel.withStructuredOutput(AnyGenDocumentSchema);
       this.courseConfigModel =
         baseModel.withStructuredOutput(CourseConfigSchema);
       this.videoOutlineModel =
@@ -104,26 +83,6 @@ export class AgentService {
     }
   }
 
-  async generateDocument(topic: string): Promise<AnyGenDocument> {
-    this.logger.log(
-      `Starting automated planning and generation for topic: ${topic}`,
-    );
-
-    // Stage 1: Analysis
-    const analysisContent = await this.analyzeTopic(topic);
-    this.logger.log(`Analysis completed for: ${topic}`);
-
-    // Stage 2: Planning
-    const plan = await this.planDocument(topic, analysisContent);
-    this.logger.log(`Planning completed for: ${plan.tasks?.length} slides.`);
-
-    // Stage 3: Content Generation
-    const document = await this.generateContentFromPlan(plan);
-    this.logger.log(`Content generation completed for: ${document.title}`);
-
-    return document;
-  }
-
   async analyzeTopic(
     topic: string,
     onStatusUpdate?: StatusUpdateCallback,
@@ -135,7 +94,9 @@ export class AgentService {
     }
 
     try {
-      const prompt = await ANALYSIS_PROMPT.format({ topic });
+      const prompt = await AGENT_PROMPTS[TargetStage.ANALYSIS].prompt.format({
+        topic,
+      });
       const result = await this.analysisModel.invoke(prompt);
       const content =
         typeof result.content === 'string'
@@ -148,62 +109,6 @@ export class AgentService {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       this.logger.error(`Error in analysis stage: ${errorMessage}`);
-      throw error;
-    }
-  }
-
-  async planDocument(
-    topic: string,
-    analysisContent: string,
-    metaData?: JobStartMetaDataPayload,
-    onStatusUpdate?: StatusUpdateCallback,
-  ): Promise<DocumentPlan> {
-    if (!this.planningModel) {
-      throw new Error('Planning model not initialized');
-    }
-
-    try {
-      await onStatusUpdate?.('planning', 15, '正在基于解析结果规划全局任务...');
-
-      const inputContext = `用户需求: ${topic}\n\n需求深度解析: ${analysisContent}`;
-      const prompt = await PLANNING_PROMPT.format({
-        topic: inputContext,
-      });
-
-      const result = await this.planningModel.invoke(prompt);
-      this.logger.log(`Planning completed for: ${JSON.stringify(result)}`);
-
-      return result;
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error in planning stage: ${errorMessage}`);
-      throw error;
-    }
-  }
-
-  async generateContentFromPlan(
-    plan: DocumentPlan,
-    onStatusUpdate?: StatusUpdateCallback,
-  ): Promise<AnyGenDocument> {
-    if (onStatusUpdate) {
-      await onStatusUpdate('generating', 50, '正在生成详细页面内容...');
-    }
-
-    if (!this.contentModel) {
-      throw new Error('Content model not initialized');
-    }
-
-    try {
-      const prompt = await CONTENT_GENERATION_PROMPT.format({
-        plan: JSON.stringify(plan),
-      });
-      const result = await this.contentModel.invoke(prompt);
-      return result;
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error in content generation stage: ${errorMessage}`);
       throw error;
     }
   }
@@ -221,7 +126,9 @@ export class AgentService {
     }
 
     try {
-      const prompt = await COURSE_CONFIG_PROMPT.format({
+      const prompt = await AGENT_PROMPTS[
+        TargetStage.COURSE_CONFIG
+      ].prompt.format({
         topic,
         analysis: analysisContent,
         refinementPrompt: refinementPrompt || 'None',
@@ -249,7 +156,9 @@ export class AgentService {
     }
 
     try {
-      const prompt = await VIDEO_OUTLINE_PROMPT.format({
+      const prompt = await AGENT_PROMPTS[
+        TargetStage.VIDEO_OUTLINE
+      ].prompt.format({
         courseConfig: JSON.stringify(courseConfig),
         refinementPrompt: refinementPrompt || 'None',
       });
@@ -277,7 +186,9 @@ export class AgentService {
     }
 
     try {
-      const prompt = await SLIDE_SCRIPT_PROMPT.format({
+      const prompt = await AGENT_PROMPTS[
+        TargetStage.SLIDE_SCRIPTS
+      ].prompt.format({
         videoOutline: JSON.stringify(videoOutline),
         courseConfig: JSON.stringify(courseConfig),
         refinementPrompt: refinementPrompt || 'None',
@@ -306,7 +217,7 @@ export class AgentService {
     }
 
     try {
-      const prompt = await THEME_GENERATION_PROMPT.format({
+      const prompt = await AGENT_PROMPTS[TargetStage.THEME].prompt.format({
         courseConfig: JSON.stringify(courseConfig),
         videoOutline: JSON.stringify(videoOutline),
         refinementPrompt: refinementPrompt || 'None',
@@ -344,7 +255,7 @@ export class AgentService {
     }
 
     try {
-      const prompt = await SLIDE_PAGE_GENERATION_PROMPT.format({
+      const prompt = await AGENT_PROMPTS[TargetStage.SLIDES].prompt.format({
         slideIndex: slideScript.slideIndex,
         type: slideScript.type,
         title: slideScript.title,
