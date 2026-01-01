@@ -5,6 +5,7 @@ import { Chat5StageService } from './chat-5-stage.service';
 import { ArtifactService } from './artifact.service';
 import { SocketModule } from '../socket/socket.module';
 import { WebSearchTool } from './tools/web-search.tool';
+import { IntentClassifier } from './intent-classifier.service';
 
 @Module({
   imports: [forwardRef(() => SocketModule)],
@@ -14,6 +15,7 @@ import { WebSearchTool } from './tools/web-search.tool';
     Chat5StageService,
     ArtifactService,
     WebSearchTool,
+    IntentClassifier,
   ],
   exports: [
     AgentService,
@@ -21,6 +23,7 @@ import { WebSearchTool } from './tools/web-search.tool';
     Chat5StageService,
     ArtifactService,
     WebSearchTool,
+    IntentClassifier,
   ],
 })
 export class AgentModule {}

@@ -118,6 +118,7 @@ export const CourseConfigSchema = z.object({
   targetAudience: z.string(),
   duration: z.string(),
   objectives: z.array(z.string()),
+  expectedPageCount: z.number().describe('预期生成的 PPT 总页数'),
 });
 
 export const KnowledgePointSchema = z.object({
@@ -138,6 +139,9 @@ export const VideoOutlineSchema = z.object({
 
 export const SlideScriptSchema = z.object({
   slideIndex: z.number(),
+  type: z.enum(['title', 'content', 'closing']),
+  title: z.string(),
+  content: z.union([z.string(), z.array(z.string())]),
   contentDesign: z.string(),
   visualSuggestions: z.string(),
   narrationScript: z.string(),
@@ -165,6 +169,7 @@ export const MasterSlideSchema = z.object({
 
 export const PresentationThemeSchema = z.object({
   themeName: z.string(),
+  designStyle: z.string(),
   colorScheme: ColorSchemeSchema,
   fontConfig: FontConfigSchema,
   masterSlides: z.array(MasterSlideSchema),

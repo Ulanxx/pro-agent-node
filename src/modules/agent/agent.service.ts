@@ -97,8 +97,7 @@ export class AgentService {
       this.slideScriptModel = baseModel.withStructuredOutput(
         z.array(SlideScriptSchema),
       );
-      this.themeModel =
-        baseModel.withStructuredOutput(PresentationThemeSchema);
+      this.themeModel = baseModel.withStructuredOutput(PresentationThemeSchema);
       this.slidePageModel = baseModel.withStructuredOutput(SlideHtmlSchema);
     } else {
       this.logger.warn('OPENAI_API_KEY not found, using MockLLMService logic.');
@@ -213,6 +212,7 @@ export class AgentService {
     topic: string,
     analysisContent: string,
     onStatusUpdate?: StatusUpdateCallback,
+    refinementPrompt?: string,
   ): Promise<CourseConfig> {
     await onStatusUpdate?.('course_config', 10, '正在生成课程配置...');
 
@@ -224,6 +224,7 @@ export class AgentService {
       const prompt = await COURSE_CONFIG_PROMPT.format({
         topic,
         analysis: analysisContent,
+        refinementPrompt: refinementPrompt || 'None',
       });
       const result = await this.courseConfigModel.invoke(prompt);
       this.logger.log(`Course config generated: ${JSON.stringify(result)}`);
@@ -239,6 +240,7 @@ export class AgentService {
   async generateVideoOutline(
     courseConfig: CourseConfig,
     onStatusUpdate?: StatusUpdateCallback,
+    refinementPrompt?: string,
   ): Promise<VideoOutline> {
     await onStatusUpdate?.('video_outline', 25, '正在生成视频大纲...');
 
@@ -249,6 +251,7 @@ export class AgentService {
     try {
       const prompt = await VIDEO_OUTLINE_PROMPT.format({
         courseConfig: JSON.stringify(courseConfig),
+        refinementPrompt: refinementPrompt || 'None',
       });
       const result = await this.videoOutlineModel.invoke(prompt);
       this.logger.log(`Video outline generated: ${JSON.stringify(result)}`);
@@ -265,6 +268,7 @@ export class AgentService {
     videoOutline: VideoOutline,
     courseConfig: CourseConfig,
     onStatusUpdate?: StatusUpdateCallback,
+    refinementPrompt?: string,
   ): Promise<SlideScript[]> {
     await onStatusUpdate?.('slide_script', 40, '正在生成 PPT 脚本...');
 
@@ -276,6 +280,7 @@ export class AgentService {
       const prompt = await SLIDE_SCRIPT_PROMPT.format({
         videoOutline: JSON.stringify(videoOutline),
         courseConfig: JSON.stringify(courseConfig),
+        refinementPrompt: refinementPrompt || 'None',
       });
       const result = await this.slideScriptModel.invoke(prompt);
       this.logger.log(`Slide scripts generated: ${result.length} slides`);
@@ -292,6 +297,7 @@ export class AgentService {
     courseConfig: CourseConfig,
     videoOutline: VideoOutline,
     onStatusUpdate?: StatusUpdateCallback,
+    refinementPrompt?: string,
   ): Promise<PresentationTheme> {
     await onStatusUpdate?.('theme_generation', 55, '正在生成主题风格...');
 
@@ -303,9 +309,12 @@ export class AgentService {
       const prompt = await THEME_GENERATION_PROMPT.format({
         courseConfig: JSON.stringify(courseConfig),
         videoOutline: JSON.stringify(videoOutline),
+        refinementPrompt: refinementPrompt || 'None',
       });
       const result = await this.themeModel.invoke(prompt);
-      this.logger.log(`Presentation theme generated: ${JSON.stringify(result)}`);
+      this.logger.log(
+        `Presentation theme generated: ${JSON.stringify(result)}`,
+      );
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -318,13 +327,16 @@ export class AgentService {
   async generateSlideByScript(
     slideScript: SlideScript,
     theme: PresentationTheme,
+    courseTitle: string,
+    expectedPageCount: number,
     onStatusUpdate?: StatusUpdateCallback,
+    refinementPrompt?: string,
   ): Promise<SlideHtml> {
-    const progress = 60 + (slideScript.slideIndex / 15) * 35;
+    const progress = 60 + (slideScript.slideIndex / expectedPageCount) * 35;
     await onStatusUpdate?.(
       'generating_slide',
       progress,
-      `正在生成第 ${slideScript.slideIndex + 1} 页...`,
+      `正在生成第 ${slideScript.slideIndex + 1} 页 / 共 ${expectedPageCount} 页...`,
     );
 
     if (!this.slidePageModel) {
@@ -333,8 +345,20 @@ export class AgentService {
 
     try {
       const prompt = await SLIDE_PAGE_GENERATION_PROMPT.format({
-        slideScript: JSON.stringify(slideScript),
-        theme: JSON.stringify(theme),
+        slideIndex: slideScript.slideIndex,
+        type: slideScript.type,
+        title: slideScript.title,
+        content: Array.isArray(slideScript.content)
+          ? slideScript.content.join('; ')
+          : slideScript.content,
+        visualSuggestions: slideScript.visualSuggestions,
+        designStyle: theme.themeName, // 或者从 theme 中获取更详细的描述
+        primaryColor: theme.colorScheme.primary,
+        secondaryColor: theme.colorScheme.secondary,
+        backgroundColor: theme.colorScheme.background,
+        textColor: theme.colorScheme.text,
+        courseTitle: courseTitle,
+        refinementPrompt: refinementPrompt || 'None',
       });
       const result = await this.slidePageModel.invoke(prompt);
       this.logger.log(`Slide page ${slideScript.slideIndex} generated`);

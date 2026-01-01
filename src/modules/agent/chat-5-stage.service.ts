@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { SocketGateway } from '../socket/socket.gateway';
 import { AgentService } from './agent.service';
 import { ArtifactService } from './artifact.service';
+import { ChatService } from './chat.service';
 import { Redis } from 'ioredis';
 import {
   Artifact,
@@ -13,6 +14,7 @@ import {
   SlideHtml,
   PptHtmlDocument,
 } from '../../core/dsl/types';
+import { TargetStage } from './intent-classifier.service';
 
 @Injectable()
 export class Chat5StageService {
@@ -23,6 +25,8 @@ export class Chat5StageService {
     private readonly socketGateway: SocketGateway,
     private readonly agentService: AgentService,
     private readonly artifactService: ArtifactService,
+    @Inject(forwardRef(() => ChatService))
+    private readonly chatService: ChatService,
   ) {
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
@@ -34,47 +38,154 @@ export class Chat5StageService {
     sessionId: string,
     message: string,
     chatMessageId: string,
+    entryStage: TargetStage = TargetStage.ANALYSIS,
   ): Promise<PptHtmlDocument> {
     try {
-      const analysisContent = await this.stageAnalysis(
-        sessionId,
-        message,
-        chatMessageId,
-      );
+      let analysisContent: string = '';
+      let courseConfig: CourseConfig | null = null;
+      let videoOutline: VideoOutline | null = null;
+      let slideScripts: SlideScript[] = [];
+      let theme: PresentationTheme | null = null;
 
-      const courseConfig = await this.stageCourseConfig(
-        sessionId,
-        message,
-        analysisContent,
-        chatMessageId,
-      );
+      // Stage 1: Analysis
+      if (entryStage === TargetStage.ANALYSIS || !entryStage) {
+        analysisContent = await this.stageAnalysis(
+          sessionId,
+          message,
+          chatMessageId,
+        );
+      } else {
+        const artifact = await this.artifactService.getLatestArtifactByType(
+          sessionId,
+          'requirement_analysis',
+        );
+        analysisContent = (artifact?.content as string) || '';
+      }
 
-      const videoOutline = await this.stageVideoOutline(
-        sessionId,
-        courseConfig,
-        chatMessageId,
-      );
+      // Stage 2: Course Config
+      if (
+        entryStage === TargetStage.COURSE_CONFIG ||
+        (!courseConfig && entryStage === TargetStage.ANALYSIS) ||
+        !entryStage
+      ) {
+        courseConfig = await this.stageCourseConfig(
+          sessionId,
+          message,
+          analysisContent,
+          chatMessageId,
+          entryStage === TargetStage.COURSE_CONFIG ? message : undefined,
+        );
+      } else {
+        const artifact = await this.artifactService.getLatestArtifactByType(
+          sessionId,
+          'course_config',
+        );
+        courseConfig = artifact?.content as CourseConfig;
+      }
 
-      const slideScripts = await this.stageSlideScripts(
-        sessionId,
-        videoOutline,
-        courseConfig,
-        chatMessageId,
-      );
+      // Stage 3: Video Outline
+      if (
+        entryStage === TargetStage.VIDEO_OUTLINE ||
+        (!videoOutline &&
+          [TargetStage.ANALYSIS, TargetStage.COURSE_CONFIG].includes(
+            entryStage,
+          )) ||
+        !entryStage
+      ) {
+        if (!courseConfig) {
+          throw new Error('Course config is required for video outline');
+        }
+        videoOutline = await this.stageVideoOutline(
+          sessionId,
+          courseConfig,
+          chatMessageId,
+          entryStage === TargetStage.VIDEO_OUTLINE ? message : undefined,
+        );
+      } else {
+        const artifact = await this.artifactService.getLatestArtifactByType(
+          sessionId,
+          'video_outline',
+        );
+        videoOutline = artifact?.content as VideoOutline;
+      }
 
-      const theme = await this.stagePresentationTheme(
-        sessionId,
-        courseConfig,
-        videoOutline,
-        chatMessageId,
-      );
+      // Stage 4: Slide Scripts
+      if (
+        entryStage === TargetStage.SLIDE_SCRIPTS ||
+        (!slideScripts.length &&
+          [
+            TargetStage.ANALYSIS,
+            TargetStage.COURSE_CONFIG,
+            TargetStage.VIDEO_OUTLINE,
+          ].includes(entryStage)) ||
+        !entryStage
+      ) {
+        if (!videoOutline || !courseConfig) {
+          throw new Error(
+            'Video outline and course config are required for slide scripts',
+          );
+        }
+        slideScripts = await this.stageSlideScripts(
+          sessionId,
+          videoOutline,
+          courseConfig,
+          chatMessageId,
+          entryStage === TargetStage.SLIDE_SCRIPTS ? message : undefined,
+        );
+      } else {
+        const artifact = await this.artifactService.getLatestArtifactByType(
+          sessionId,
+          'slide_scripts',
+        );
+        slideScripts = (artifact?.content as SlideScript[]) || [];
+      }
 
+      // Stage 5: Theme
+      if (
+        entryStage === TargetStage.THEME ||
+        (!theme &&
+          [
+            TargetStage.ANALYSIS,
+            TargetStage.COURSE_CONFIG,
+            TargetStage.VIDEO_OUTLINE,
+            TargetStage.SLIDE_SCRIPTS,
+          ].includes(entryStage)) ||
+        !entryStage
+      ) {
+        if (!courseConfig || !videoOutline) {
+          throw new Error(
+            'Course config and video outline are required for theme',
+          );
+        }
+        theme = await this.stagePresentationTheme(
+          sessionId,
+          courseConfig,
+          videoOutline,
+          chatMessageId,
+          entryStage === TargetStage.THEME ? message : undefined,
+        );
+      } else {
+        const artifact = await this.artifactService.getLatestArtifactByType(
+          sessionId,
+          'presentation_theme',
+        );
+        theme = artifact?.content as PresentationTheme;
+      }
+
+      // Stage 6: Slides
+      if (!theme || !courseConfig || !videoOutline) {
+        throw new Error(
+          'Theme, course config, and video outline are required for slides',
+        );
+      }
       const document = await this.stageSlideGeneration(
         sessionId,
         slideScripts,
         theme,
         courseConfig,
+        videoOutline.theme,
         chatMessageId,
+        entryStage === TargetStage.SLIDES ? message : undefined,
       );
 
       this.socketGateway.emitCompletion(sessionId, {
@@ -102,6 +213,19 @@ export class Chat5StageService {
     const artifactId = `art_analysis_${uuidv4()}`;
 
     this.socketGateway.emitToolStart(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'analyze_topic',
+      title: '需求分析',
+      content: '',
+      progressText: '正在分析需求...',
+      parentMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
       id: toolMessageId,
       role: 'assistant',
       kind: 'tool',
@@ -142,6 +266,11 @@ export class Chat5StageService {
       artifactIds: [artifactId],
     });
 
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
     return analysisContent;
   }
 
@@ -150,6 +279,7 @@ export class Chat5StageService {
     topic: string,
     analysisContent: string,
     parentMessageId: string,
+    refinementPrompt?: string,
   ): Promise<CourseConfig> {
     const toolMessageId = `tool_${uuidv4()}`;
     const artifactId = `art_course_config_${uuidv4()}`;
@@ -160,9 +290,26 @@ export class Chat5StageService {
       kind: 'tool',
       status: 'in_progress',
       toolName: 'generate_course_config',
-      title: '课程配置生成',
+      title: refinementPrompt ? '课程配置优化' : '课程配置生成',
       content: '',
-      progressText: '正在生成课程配置...',
+      progressText: refinementPrompt
+        ? '正在优化课程配置...'
+        : '正在生成课程配置...',
+      parentMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'generate_course_config',
+      title: refinementPrompt ? '课程配置优化' : '课程配置生成',
+      content: '',
+      progressText: refinementPrompt
+        ? '正在优化课程配置...'
+        : '正在生成课程配置...',
       parentMessageId,
       timestamp: Date.now(),
     });
@@ -173,6 +320,7 @@ export class Chat5StageService {
       () => {
         // 阶段 1-5 不发送 progress 事件
       },
+      refinementPrompt,
     );
 
     const artifact: Artifact = {
@@ -196,6 +344,11 @@ export class Chat5StageService {
       artifactIds: [artifactId],
     });
 
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
     return courseConfig;
   }
 
@@ -203,6 +356,7 @@ export class Chat5StageService {
     sessionId: string,
     courseConfig: CourseConfig,
     parentMessageId: string,
+    refinementPrompt?: string,
   ): Promise<VideoOutline> {
     const toolMessageId = `tool_${uuidv4()}`;
     const artifactId = `art_video_outline_${uuidv4()}`;
@@ -213,9 +367,26 @@ export class Chat5StageService {
       kind: 'tool',
       status: 'in_progress',
       toolName: 'generate_video_outline',
-      title: '视频大纲生成',
+      title: refinementPrompt ? '视频大纲优化' : '视频大纲生成',
       content: '',
-      progressText: '正在生成视频大纲...',
+      progressText: refinementPrompt
+        ? '正在优化视频大纲...'
+        : '正在生成视频大纲...',
+      parentMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'generate_video_outline',
+      title: refinementPrompt ? '视频大纲优化' : '视频大纲生成',
+      content: '',
+      progressText: refinementPrompt
+        ? '正在优化视频大纲...'
+        : '正在生成视频大纲...',
       parentMessageId,
       timestamp: Date.now(),
     });
@@ -225,6 +396,7 @@ export class Chat5StageService {
       () => {
         // 阶段 1-5 不发送 progress 事件
       },
+      refinementPrompt,
     );
 
     const artifact: Artifact = {
@@ -248,6 +420,11 @@ export class Chat5StageService {
       artifactIds: [artifactId],
     });
 
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
     return videoOutline;
   }
 
@@ -256,6 +433,7 @@ export class Chat5StageService {
     videoOutline: VideoOutline,
     courseConfig: CourseConfig,
     parentMessageId: string,
+    refinementPrompt?: string,
   ): Promise<SlideScript[]> {
     const toolMessageId = `tool_${uuidv4()}`;
     const artifactId = `art_slide_scripts_${uuidv4()}`;
@@ -266,9 +444,26 @@ export class Chat5StageService {
       kind: 'tool',
       status: 'in_progress',
       toolName: 'generate_slide_scripts',
-      title: 'PPT 脚本生成',
+      title: refinementPrompt ? 'PPT 脚本优化' : 'PPT 脚本生成',
       content: '',
-      progressText: '正在生成 PPT 脚本...',
+      progressText: refinementPrompt
+        ? '正在优化 PPT 脚本...'
+        : '正在生成 PPT 脚本...',
+      parentMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'generate_slide_scripts',
+      title: refinementPrompt ? 'PPT 脚本优化' : 'PPT 脚本生成',
+      content: '',
+      progressText: refinementPrompt
+        ? '正在优化 PPT 脚本...'
+        : '正在生成 PPT 脚本...',
       parentMessageId,
       timestamp: Date.now(),
     });
@@ -279,6 +474,7 @@ export class Chat5StageService {
       () => {
         // 阶段 1-5 不发送 progress 事件
       },
+      refinementPrompt,
     );
 
     const artifact: Artifact = {
@@ -302,6 +498,11 @@ export class Chat5StageService {
       artifactIds: [artifactId],
     });
 
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
     return slideScripts;
   }
 
@@ -310,6 +511,7 @@ export class Chat5StageService {
     courseConfig: CourseConfig,
     videoOutline: VideoOutline,
     parentMessageId: string,
+    refinementPrompt?: string,
   ): Promise<PresentationTheme> {
     const toolMessageId = `tool_${uuidv4()}`;
     const artifactId = `art_theme_${uuidv4()}`;
@@ -320,9 +522,26 @@ export class Chat5StageService {
       kind: 'tool',
       status: 'in_progress',
       toolName: 'generate_presentation_theme',
-      title: '主题风格生成',
+      title: refinementPrompt ? '主题风格优化' : '主题风格生成',
       content: '',
-      progressText: '正在生成主题风格...',
+      progressText: refinementPrompt
+        ? '正在优化主题风格...'
+        : '正在生成主题风格...',
+      parentMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'generate_presentation_theme',
+      title: refinementPrompt ? '主题风格优化' : '主题风格生成',
+      content: '',
+      progressText: refinementPrompt
+        ? '正在优化主题风格...'
+        : '正在生成主题风格...',
       parentMessageId,
       timestamp: Date.now(),
     });
@@ -333,6 +552,7 @@ export class Chat5StageService {
       () => {
         // 阶段 1-5 不发送 progress 事件
       },
+      refinementPrompt,
     );
 
     const artifact: Artifact = {
@@ -356,6 +576,11 @@ export class Chat5StageService {
       artifactIds: [artifactId],
     });
 
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
     return theme;
   }
 
@@ -364,7 +589,9 @@ export class Chat5StageService {
     slideScripts: SlideScript[],
     theme: PresentationTheme,
     courseConfig: CourseConfig,
+    courseTitle: string,
     chatMessageId: string,
+    refinementPrompt?: string,
   ): Promise<PptHtmlDocument> {
     const toolMessageId = `tool_${uuidv4()}`;
     const artifactId = `art_ppt_html_${uuidv4()}`;
@@ -375,9 +602,26 @@ export class Chat5StageService {
       kind: 'tool',
       status: 'in_progress',
       toolName: 'generate_slides',
-      title: '逐页生成 PPT HTML',
+      title: refinementPrompt ? '逐页优化 PPT HTML' : '逐页生成 PPT HTML',
       content: '',
-      progressText: '正在逐页生成 PPT HTML...',
+      progressText: refinementPrompt
+        ? '正在逐页优化 PPT HTML...'
+        : '正在逐页生成 PPT HTML...',
+      parentMessageId: chatMessageId,
+      timestamp: Date.now(),
+    });
+
+    await this.chatService.saveMessage(sessionId, {
+      id: toolMessageId,
+      role: 'assistant',
+      kind: 'tool',
+      status: 'in_progress',
+      toolName: 'generate_slides',
+      title: refinementPrompt ? '逐页优化 PPT HTML' : '逐页生成 PPT HTML',
+      content: '',
+      progressText: refinementPrompt
+        ? '正在逐页优化 PPT HTML...'
+        : '正在逐页生成 PPT HTML...',
       parentMessageId: chatMessageId,
       timestamp: Date.now(),
     });
@@ -387,6 +631,8 @@ export class Chat5StageService {
       const page = await this.agentService.generateSlideByScript(
         script,
         theme,
+        courseTitle,
+        courseConfig.expectedPageCount,
         (status, progress, msg) => {
           this.socketGateway.emitProgress(sessionId, {
             status,
@@ -395,6 +641,7 @@ export class Chat5StageService {
             artifactId,
           });
         },
+        refinementPrompt,
       );
       pages.push(page);
     }
@@ -424,6 +671,11 @@ export class Chat5StageService {
 
     this.socketGateway.emitToolUpdate(sessionId, {
       id: toolMessageId,
+      status: 'completed',
+      artifactIds: [artifactId],
+    });
+
+    await this.chatService.updateToolMessage(sessionId, toolMessageId, {
       status: 'completed',
       artifactIds: [artifactId],
     });

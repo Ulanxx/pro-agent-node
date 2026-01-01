@@ -88,7 +88,6 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return { status: 'success', messages, artifacts };
   }
-
   emitProgress(
     targetId: string,
     data: {
@@ -98,11 +97,12 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       artifactId?: string;
     },
   ) {
+    const normalizedProgress = Math.min(100, Math.round(data.progress));
     // Try both job and session rooms for backward compatibility
     this.server
       .to(`job_${targetId}`)
       .to(`session_${targetId}`)
-      .emit('progress', data);
+      .emit('progress', { ...data, progress: normalizedProgress });
   }
 
   emitToolStart(

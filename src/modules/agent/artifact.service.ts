@@ -28,9 +28,23 @@ export class ArtifactService {
     return Object.values(data).map((val) => JSON.parse(val));
   }
 
-  async getArtifact(sessionId: string, artifactId: string): Promise<Artifact | null> {
+  async getArtifact(
+    sessionId: string,
+    artifactId: string,
+  ): Promise<Artifact | null> {
     const key = `artifacts:${sessionId}`;
     const data = await this.redis.hget(key, artifactId);
     return data ? JSON.parse(data) : null;
+  }
+
+  async getLatestArtifactByType(
+    sessionId: string,
+    type: string,
+  ): Promise<Artifact | null> {
+    const artifacts = await this.getArtifacts(sessionId);
+    const filtered = artifacts
+      .filter((a) => a.type === type)
+      .sort((a, b) => b.timestamp - a.timestamp);
+    return filtered.length > 0 ? filtered[0] : null;
   }
 }

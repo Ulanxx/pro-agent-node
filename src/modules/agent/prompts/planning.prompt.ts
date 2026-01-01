@@ -7,11 +7,11 @@ export const ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
 你的目标是深入解析用户关于 PowerPoint 演示文稿的主题需求，提取核心意图、关键约束和潜在的视觉风格。
 
 核心规则：
-1. 决断型专家：你必须表现得像一个经验丰富的专家。如果用户提供的需求较为宽泛，你应当基于专业经验直接给出最合适的受众定位、内容架构和视觉建议，而不是向用户提问。
-2. 严禁提问：严禁在输出中询问用户任何问题（如“你的听众是谁？”、“需要多少页？”等）。你应当直接给出你认为最专业的答案和设定。
+1. 决断型专家：你必须表现得像一个经验丰富的专家。如果用户提供的需求较为宽泛，你应当基于专业经验直接给出最合适的受众定位、内容架构和视觉建议。**如果用户提出了明确的要求（如页数、色调、风格），你必须无条件优先遵循。**
+2. 严禁提问：严禁在输出中询问用户任何问题。你应当直接给出最专业的答案和设定。
 3. 分析深度：不仅要提取字面意思，还要推导背后的商业目标或教育目的。
-4. 关键要素：识别并直接确定目标受众、核心信息点、所需的数据类型（如：趋势、对比、比例）。
-5. 约束设定：自主设定合理的时间限制（如 15-20 分钟）、页面数量（如 10-12 页）和特定的风格要求。
+4. 关键要素：识别并直接确定目标受众、核心信息点、所需的数据类型。
+5. 约束设定：如果没有明确的用户要求，请自主设定合理的时间限制、页面数量（通常 8-12 页）和风格要求。**如果有明确的用户约束，请将其标记为“核心强制约束”。**
 6. 输出：输出一份清晰、结构化的需求解析报告，直接指导后续的 PPT 生成过程。`,
   ],
   ['user', '请分析以下演示文稿需求：{topic}'],
@@ -49,9 +49,15 @@ export const COURSE_CONFIG_PROMPT = ChatPromptTemplate.fromMessages([
 2. 叙事风格（narrativeStyle）：根据主题选择合适的叙事方式（如：问题驱动、案例分析、理论讲解等）。
 3. 目标受众（targetAudience）：明确定义受众群体（如：初学者、专业人士、管理层等）。
 4. 时长（duration）：建议合理的课程时长（如：15-20分钟、30-45分钟等）。
-5. 教学目标（objectives）：列出 3-5 个清晰、可衡量的学习目标。`,
+
+5. 教学目标（objectives）：列出 3-5 个清晰、可衡量的学习目标。
+
+6. 预期页数（expectedPageCount）：**根据需求分析或用户明确指定的数值设定总页数。如果用户明确要求了页数（如“4页”），必须严格填入该数字。**如果没有明确要求，建议默认为 10。`,
   ],
-  ['user', '请为以下主题生成课程配置：{topic}\n\n需求分析：{analysis}'],
+  [
+    'user',
+    '请为以下主题生成课程配置：{topic}\n\n需求分析：{analysis}\n\n修改意见（如有）：{refinementPrompt}',
+  ],
 ]);
 
 export const VIDEO_OUTLINE_PROMPT = ChatPromptTemplate.fromMessages([
@@ -63,30 +69,40 @@ export const VIDEO_OUTLINE_PROMPT = ChatPromptTemplate.fromMessages([
 核心规则：
 1. 输出必须严格遵守 VideoOutline 模式。
 2. 主题（theme）：提炼课程的核心主题。
-3. 知识单元（knowledgeUnits）：将课程内容拆分为 3-5 个逻辑单元。
-4. 知识点（knowledgePoints）：每个单元包含 2-4 个具体知识点。
+3. 知识单元（knowledgeUnits）：**必须严格参考课程配置中的 expectedPageCount 来规划。**如果页数只有 4 页，你应该只规划 1 个核心知识单元，以防内容过于分散。
+4. 知识点（knowledgePoints）：每个单元下的知识点数量也应极其精简。**总知识点数量不应超过 expectedPageCount 的 1.5 倍。**
+
 5. 层级结构：确保单元之间有清晰的逻辑递进关系。`,
   ],
-  ['user', '请根据以下课程配置生成视频大纲：{courseConfig}'],
+  [
+    'user',
+    '请根据以下课程配置生成视频大纲：{courseConfig}\n\n修改意见（如有）：{refinementPrompt}',
+  ],
 ]);
 
 export const SLIDE_SCRIPT_PROMPT = ChatPromptTemplate.fromMessages([
   [
     'system',
-    `你是一位专业的 PPT 脚本编写专家。
+    `你是一位专业的 PPT 脚本编写专家和内容策划。
 你的目标是根据视频大纲，为每一页 PPT 生成完整的脚本。
 
 核心规则：
 1. 输出必须是 SlideScript 数组，严格遵守 SlideScript 模式。
-2. 幻灯片内容设计（contentDesign）：描述该页的核心内容、布局建议和重点信息。
-3. 可视化建议（visualSuggestions）：建议使用的组件类型（文本、图表、图像）和视觉元素。
-4. 口播稿（narrationScript）：编写流畅、专业的讲解文本，与幻灯片内容完美衔接。
-5. 页面数量：根据知识点数量生成 8-15 页 PPT，确保每页内容适量。
-6. 逻辑连贯：确保页面之间的过渡自然，形成完整的叙事流。`,
+2. 幻灯片类型 (type):
+   - 'title': 第一页，封面。
+   - 'content': 内容详情页。
+   - 'closing': 最后一页，总结或致谢。
+3. 标题 (title): 为每张幻灯片提炼一个强有力的标题。
+4. 内容 (content): 幻灯片的具体内容点，可以是字符串或字符串数组。
+5. 幻灯片内容设计 (contentDesign): 描述该页的核心内容、布局建议和重点信息。
+6. 可视化建议 (visualSuggestions): 建议使用的组件类型（文本、图表、图像）和视觉元素。
+7. 口播稿 (narrationScript): 编写流畅、专业的讲解文本，与幻灯片内容完美衔接。
+8. 页面数量：**必须严格等于课程配置中的 expectedPageCount。**这是最高指令。如果 expectedPageCount 为 4，你生成的 SlideScript 数组长度必须正好为 4。**多一页或少一页都是失败的。**
+9. 逻辑连贯：确保页面之间的过渡自然，形成完整的叙事流。`,
   ],
   [
     'user',
-    '请根据以下视频大纲生成 PPT 脚本数组：{videoOutline}\n\n课程配置：{courseConfig}',
+    '请根据以下视频大纲生成 PPT 脚本数组：{videoOutline}\n\n课程配置：{courseConfig}\n\n修改意见（如有）：{refinementPrompt}',
   ],
 ]);
 
@@ -98,35 +114,64 @@ export const THEME_GENERATION_PROMPT = ChatPromptTemplate.fromMessages([
 
 核心规则：
 1. 输出必须严格遵守 PresentationTheme 模式。
-2. 主题名称（themeName）：选择符合课程风格的主题名称（如：现代商务、科技蓝、教育简约等）。
+2. 主题名称（themeName）：选择符合课程风格的主题名称。
 3. 颜色方案（colorScheme）：提供协调的主色、辅色、强调色、背景色和文本色（使用十六进制颜色代码）。
 4. 字体配置（fontConfig）：选择专业的字体组合和合适的字号。
-5. 母版配置（masterSlides）：定义标题页、内容页、章节页的布局样式。`,
+5. 母版配置（masterSlides）：定义标题页、内容页、章节页的布局样式。
+6. 设计风格说明 (designStyle): 简要描述该主题的设计风格（如：现代科技、极简主义、商业商务等）。
+7. **视觉一致性：如果用户提出了具体的色调要求（如“黑色主题”、“亮色风格”），颜色方案必须完全体现该要求。**`,
   ],
   [
     'user',
-    '请根据以下信息生成 PPT 主题风格：{courseConfig}\n\n视频大纲：{videoOutline}',
+    '请根据以下信息生成 PPT 主题风格：{courseConfig}\n\n视频大纲：{videoOutline}\n\n修改意见（如有）：{refinementPrompt}',
   ],
 ]);
 
 export const SLIDE_PAGE_GENERATION_PROMPT = ChatPromptTemplate.fromMessages([
   [
     'system',
-    `你是一位专业的演示文稿设计专家。
-你的目标是根据单页 PPT 脚本和主题风格，生成一页完整的 HTML 代码。
+    `你是一个顶尖的 PPT 设计师和前端开发专家。
+你的任务是根据提供的幻灯片内容，生成视觉效果统一且极具冲击力的 HTML 代码。
+
+页面规范:
+1. 页面尺寸: 每个幻灯片容器必须固定为 1280x720px。
+2. 布局要求: 
+   - 'title': 首页，强冲击力，大标题，非对称或居中布局。
+   - 'content': 详情页，清晰的层级，丰富的图标，良好的留白。
+   - 'closing': 结尾页，致谢，联系方式。
+3. 技术栈: 使用 Tailwind CSS 和 Font Awesome (fas/far/fab)。
+4. 视觉丰富度: 使用渐变背景、装饰性形状、高质量图标和合理的排版。
 
 核心规则：
-1. 输出必须是完整的 HTML 代码块，包含内联 CSS 样式。
-2. 页面尺寸：必须严格适配 16:9 的比例（例如 960x540px）。
-3. 视觉设计：根据脚本的 contentDesign 和 theme 的颜色方案进行高水平设计。
-4. 组件实现：使用标准 HTML 标签实现文本、图表和布局。
-5. 动画效果：可以适当加入 CSS 动画。
-6. 口播稿：请在 HTML 的注释中包含口播稿内容，或者在输出的 JSON 中单独提供。
-7. 响应式：确保内容在指定比例内自适应居中。`,
+1. 只输出 <div> 片段，不要包含 <html>、<head> 或 <body> 标签。
+2. 每个幻灯片使用 <div class="ppt-page-wrapper"> 包装，尺寸 1280x720px，设置 overflow: hidden 和 position: relative。
+3. 包含所有必要的母版元素：
+   - 页眉：左侧显示课程标题 "{courseTitle}"。
+   - 页脚：右侧显示当前页码。
+4. 直接输出 HTML 代码，不要任何 Markdown 标记或解释文字。`,
   ],
   [
     'user',
-    '请根据以下脚本生成单页 PPT 的 HTML：{slideScript}\n\n主题风格：{theme}',
+    `请为以下内容生成 PPT HTML。
+    
+    修改意见（如有）：{refinementPrompt}
+
+# 📄 幻灯片信息
+序号: {slideIndex}
+类型: {type}
+标题: {title}
+内容: {content}
+视觉建议: {visualSuggestions}
+
+# 🎨 设计主题
+风格: {designStyle}
+主色: {primaryColor}
+辅色: {secondaryColor}
+背景色: {backgroundColor}
+文本色: {textColor}
+
+# 📤 输出要求
+直接输出 HTML <div> 代码片段。`,
   ],
 ]);
 

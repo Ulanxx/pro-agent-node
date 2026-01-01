@@ -4,6 +4,7 @@ import { SocketGateway } from '../socket/socket.gateway';
 import { AgentService } from '../agent/agent.service';
 import { Chat5StageService } from './chat-5-stage.service';
 import { ArtifactService } from './artifact.service';
+import { IntentClassifier, UserIntent } from './intent-classifier.service';
 import { Redis } from 'ioredis';
 import { Artifact } from '../../core/dsl/types';
 import { JobStartMetaDataPayload } from 'src/shared/types/process';
@@ -20,6 +21,7 @@ export class ChatService {
     private readonly agentService: AgentService,
     private readonly chat5StageService: Chat5StageService,
     private readonly artifactService: ArtifactService,
+    private readonly intentClassifier: IntentClassifier,
   ) {
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
@@ -41,10 +43,50 @@ export class ChatService {
       timestamp: Date.now(),
     });
 
+    const history = await this.getSessionHistory(sessionId);
+    const classification = await this.intentClassifier.classify(
+      message,
+      history,
+    );
+
     const chatMessageId = `msg_${uuidv4()}`;
 
     if (this.use5StageFlow) {
-      this.logger.log('Using 5-stage PPT generation flow');
+      this.logger.log(
+        `Using 5-stage PPT generation flow. Intent: ${classification.intent}, Target Stage: ${classification.targetStage}`,
+      );
+
+      if (classification.intent === UserIntent.REFINEMENT) {
+        const welcomeMessage = `收到您的反馈：“${message}”。我将为您优化 PPT 的 ${classification.targetStage} 阶段及后续流程。`;
+
+        this.socketGateway.emitMessageStart(sessionId, {
+          id: chatMessageId,
+          role: 'assistant',
+          content: '',
+        });
+
+        this.socketGateway.emitMessageChunk(sessionId, {
+          id: chatMessageId,
+          chunk: welcomeMessage,
+        });
+
+        await this.saveMessage(sessionId, {
+          id: chatMessageId,
+          role: 'assistant',
+          kind: 'chat',
+          content: welcomeMessage,
+          timestamp: Date.now(),
+        });
+
+        await this.chat5StageService.handle5StagePPTGeneration(
+          sessionId,
+          message,
+          chatMessageId,
+          classification.targetStage,
+        );
+        return;
+      }
+
       const welcomeMessage =
         '我将使用 5 阶段流程为您生成专业的教学 PPT：课程配置 → 视频大纲 → PPT 脚本 → 主题风格 → 逐页生成。';
 
@@ -110,7 +152,7 @@ export class ChatService {
       });
 
       const analysisToolMessageId = `tool_${uuidv4()}`;
-      this.socketGateway.emitToolMessageStart(sessionId, {
+      this.socketGateway.emitToolStart(sessionId, {
         id: analysisToolMessageId,
         role: 'assistant',
         kind: 'tool',
@@ -148,12 +190,9 @@ export class ChatService {
             artifactId: analysisId,
           });
 
-          this.socketGateway.emitToolMessageUpdate(sessionId, {
+          this.socketGateway.emitMessageChunk(sessionId, {
             id: analysisToolMessageId,
-            patch: {
-              progressText: msg,
-            },
-            timestamp: Date.now(),
+            chunk: msg,
           });
 
           await this.updateToolMessage(sessionId, analysisToolMessageId, {
@@ -182,10 +221,9 @@ export class ChatService {
         artifactIds: [analysisId],
       });
 
-      this.socketGateway.emitToolMessageComplete(sessionId, {
+      this.socketGateway.emitToolUpdate(sessionId, {
         id: analysisToolMessageId,
         status: 'completed',
-        timestamp: Date.now(),
       });
 
       await this.updateToolMessage(sessionId, analysisToolMessageId, {
@@ -194,7 +232,7 @@ export class ChatService {
       });
 
       const planToolMessageId = `tool_${uuidv4()}`;
-      this.socketGateway.emitToolMessageStart(sessionId, {
+      this.socketGateway.emitToolStart(sessionId, {
         id: planToolMessageId,
         role: 'assistant',
         kind: 'tool',
@@ -234,12 +272,9 @@ export class ChatService {
             artifactId: planId,
           });
 
-          this.socketGateway.emitToolMessageUpdate(sessionId, {
+          this.socketGateway.emitMessageChunk(sessionId, {
             id: planToolMessageId,
-            patch: {
-              progressText: msg,
-            },
-            timestamp: Date.now(),
+            chunk: msg,
           });
 
           await this.updateToolMessage(sessionId, planToolMessageId, {
@@ -268,10 +303,9 @@ export class ChatService {
         artifactIds: [planId],
       });
 
-      this.socketGateway.emitToolMessageComplete(sessionId, {
+      this.socketGateway.emitToolUpdate(sessionId, {
         id: planToolMessageId,
         status: 'completed',
-        timestamp: Date.now(),
       });
 
       await this.updateToolMessage(sessionId, planToolMessageId, {
@@ -292,12 +326,6 @@ export class ChatService {
     }
   }
 
-  private async saveMessage(sessionId: string, message: Message) {
-    const key = `chat:history:${sessionId}`;
-    await this.redis.rpush(key, JSON.stringify(message));
-    await this.redis.expire(key, 86400);
-  }
-
   private async saveToolMessage(
     sessionId: string,
     toolMessage: AssistantToolMessage,
@@ -307,7 +335,13 @@ export class ChatService {
     await this.redis.expire(key, 86400);
   }
 
-  private async updateToolMessage(
+  async saveMessage(sessionId: string, message: Message) {
+    const key = `chat:history:${sessionId}`;
+    await this.redis.rpush(key, JSON.stringify(message));
+    await this.redis.expire(key, 86400);
+  }
+
+  async updateToolMessage(
     sessionId: string,
     toolMessageId: string,
     updates: Partial<AssistantToolMessage>,
