@@ -1,0 +1,100 @@
+[
+    {
+        "id": "1767250971214",
+        "role": "user",
+        "content": "什么是 Agent",
+        "timestamp": 1767250971214
+    },
+    {
+        "id": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "role": "assistant",
+        "content": "我将使用 5 阶段流程为您生成专业的教学 PPT：课程配置 → 视频大纲 → PPT 脚本 → 主题风格 → 逐页生成。",
+        "kind": "chat",
+        "status": "in_progress",
+        "timestamp": 1767250971238,
+        "artifactIds": []
+    },
+    {
+        "id": "tool_4dc26c6c-c954-43bd-be5c-21c0cca0665d",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "completed",
+        "title": "需求分析",
+        "toolName": "analyze_topic",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767250971227,
+        "artifactIds": [
+            "art_analysis_646cdebc-3126-4136-9d57-00c5832b9f32"
+        ]
+    },
+    {
+        "id": "tool_e96bf358-f210-4905-bd14-684dd1e53a90",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "completed",
+        "title": "课程配置生成",
+        "toolName": "generate_course_config",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767250980106,
+        "artifactIds": [
+            "art_course_config_f5b2702b-ebd0-4663-9d0e-4dd77a15b914"
+        ]
+    },
+    {
+        "id": "tool_b1b4a7c0-55c0-4fba-80d8-258f27c6e626",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "completed",
+        "title": "视频大纲生成",
+        "toolName": "generate_video_outline",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767250983617,
+        "artifactIds": [
+            "art_video_outline_421ded33-8da7-49de-b268-6584f9728f87"
+        ]
+    },
+    {
+        "id": "tool_551eb010-a796-461e-9b8e-4e1ca885c64b",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "completed",
+        "title": "PPT 脚本生成",
+        "toolName": "generate_slide_scripts",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767250990778,
+        "artifactIds": [
+            "art_slide_scripts_51184926-c8af-4227-99e3-e1cfd49bbf27"
+        ]
+    },
+    {
+        "id": "tool_f0c99faa-2c38-489c-b9c4-b9d7a14b3892",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "completed",
+        "title": "主题风格生成",
+        "toolName": "generate_presentation_theme",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767251006939,
+        "artifactIds": [
+            "art_theme_26a7657f-52e1-429c-abab-69fe592b26d2"
+        ]
+    },
+    {
+        "id": "tool_0f906b3f-4014-4a0c-a128-497471e881b5",
+        "role": "assistant",
+        "kind": "tool",
+        "status": "in_progress",
+        "title": "逐页生成 PPT",
+        "toolName": "generate_slides",
+        "progressText": "正在逐页生成 PPT...",
+        "parentMessageId": "msg_f1363e72-3a8d-42bf-99b1-20e3b96dd85d",
+        "content": "",
+        "timestamp": 1767251012127,
+        "artifactIds": []
+    }
+]

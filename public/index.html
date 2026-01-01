@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnyGenAgent - Manus Style Chat</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #e2e8f0;
+            border-radius: 10px;
+        }
+        .artifact-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .artifact-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-[#f9fafb] h-screen overflow-hidden flex flex-col">
+    <!-- Top Navigation -->
+    <nav class="h-16 border-b bg-white flex items-center justify-between px-6 shrink-0 z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
+                <i data-lucide="zap" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="font-bold text-xl tracking-tight">AnyGenAgent</span>
+            <span class="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">Beta</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <div id="connectionStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 text-red-600 text-xs font-medium">
+                <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                Disconnected
+            </div>
+            <button class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition">
+                <i data-lucide="settings" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex overflow-hidden">
+        <!-- Left Side: Chat Interface -->
+        <div class="w-1/3 border-r bg-white flex flex-col relative min-w-[400px]">
+            <!-- Chat Messages -->
+            <div id="chatHistory" class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                <div class="flex gap-4">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                        <i data-lucide="bot" class="text-blue-600 w-5 h-5"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <p class="text-sm font-semibold text-gray-900">AnyGen Agent</p>
+                        <div class="bg-gray-50 rounded-2xl rounded-tl-none p-4 text-sm text-gray-700 leading-relaxed shadow-sm border border-gray-100">
+                            你好！我是 AnyGen 智能体。告诉我你想生成的 PPT 主题，我会为你自动规划并生成内容。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="p-6 border-t bg-white">
+                <div id="currentStatus" class="mb-3 px-3 py-2 rounded-lg bg-blue-50 border border-blue-100 hidden">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span id="statusLabel" class="text-[11px] font-bold text-blue-700 uppercase tracking-wider">Planning</span>
+                        <span id="statusPercent" class="text-xs font-bold text-blue-600">10%</span>
+                    </div>
+                    <div class="w-full bg-blue-200/50 rounded-full h-1.5">
+                        <div id="statusProgress" class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: 10%"></div>
+                    </div>
+                    <p id="statusMsg" class="text-[11px] text-blue-600 mt-1.5 truncate">正在规划演示文稿结构...</p>
+                </div>
+
+                <div class="relative group">
+                    <textarea id="topicInput" rows="1" placeholder="输入一个主题，例如：2025年机器人技术趋势..." 
+                        class="w-full pl-4 pr-12 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-black focus:border-black outline-none transition resize-none text-sm group-hover:bg-gray-100 focus:bg-white"></textarea>
+                    <button id="sendBtn" onclick="sendMessage()" class="absolute right-3 bottom-3 p-2 bg-black text-white rounded-xl hover:opacity-80 transition disabled:opacity-30 disabled:cursor-not-allowed">
+                        <i data-lucide="arrow-up" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <p class="text-[10px] text-gray-400 mt-3 text-center">按 Enter 发送，使用 Agentic Workflow 进行多阶段生成</p>
+            </div>
+        </div>
+
+        <!-- Right Side: Artifacts Preview -->
+        <div class="flex-1 bg-[#f9fafb] flex flex-col overflow-hidden">
+            <div class="h-14 px-6 border-b flex items-center justify-between bg-white/50 backdrop-blur-sm sticky top-0 z-10">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="layout" class="w-4 h-4 text-gray-500"></i>
+                    <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Artifacts & Preview</h2>
+                </div>
+                <div class="flex items-center gap-2" id="artifactStats">
+                    <span class="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded-md font-medium">Ready to start</span>
+                </div>
+            </div>
+
+            <div id="artifactsContainer" class="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <!-- Empty State -->
+                <div id="emptyArtifacts" class="h-full flex flex-col items-center justify-center text-gray-400 space-y-4">
+                    <div class="w-16 h-16 rounded-3xl bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center">
+                        <i data-lucide="box" class="w-8 h-8 text-gray-300"></i>
+                    </div>
+                    <p class="text-sm font-medium">生成的产物将在这里实时显示</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        const socket = io('http://localhost:3000');
+        const chatHistory = document.getElementById('chatHistory');
+        const topicInput = document.getElementById('topicInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const currentStatus = document.getElementById('currentStatus');
+        const artifactsContainer = document.getElementById('artifactsContainer');
+        const emptyArtifacts = document.getElementById('emptyArtifacts');
+        
+        let sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+
+        // Socket Events
+        socket.on('connect', () => {
+            const status = document.getElementById('connectionStatus');
+            status.innerHTML = '<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>Connected';
+            status.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 text-green-600 text-xs font-medium';
+        });
+
+        socket.on('disconnect', () => {
+            const status = document.getElementById('connectionStatus');
+            status.innerHTML = '<div class="w-2 h-2 rounded-full bg-red-500"></div>Disconnected';
+            status.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 text-red-600 text-xs font-medium';
+        });
+
+        socket.on('progress', (data) => {
+            console.log('Progress:', data);
+            showStatus(data);
+        });
+
+        socket.on('artifact:update', (data) => {
+            console.log('Artifact Update:', data);
+            addArtifact(data);
+        });
+
+        socket.on('completion', (data) => {
+            console.log('Completion:', data);
+            hideStatus();
+            addBotMessage(data.success ? '演示文稿生成完成！你可以在右侧预览产物。' : '抱歉，生成过程中出现了错误：' + data.error);
+        });
+
+        // Chat Logic
+        function sendMessage() {
+            const message = topicInput.value.trim();
+            if (!message) return;
+
+            addUserMessage(message);
+            topicInput.value = '';
+            topicInput.disabled = true;
+            sendBtn.disabled = true;
+
+            socket.emit('chat:send', { message, sessionId });
+        }
+
+        topicInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        function addUserMessage(msg) {
+            const div = document.createElement('div');
+            div.className = 'flex gap-4 justify-end';
+            div.innerHTML = `
+                <div class="space-y-1 text-right">
+                    <p class="text-sm font-semibold text-gray-900">You</p>
+                    <div class="bg-black rounded-2xl rounded-tr-none p-4 text-sm text-white leading-relaxed shadow-md inline-block max-w-[80%] text-left">
+                        ${msg}
+                    </div>
+                </div>
+            `;
+            chatHistory.appendChild(div);
+            scrollToBottom();
+        }
+
+        function addBotMessage(msg) {
+            const div = document.createElement('div');
+            div.className = 'flex gap-4';
+            div.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                    <i data-lucide="bot" class="text-blue-600 w-5 h-5"></i>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-sm font-semibold text-gray-900">AnyGen Agent</p>
+                    <div class="bg-gray-50 rounded-2xl rounded-tl-none p-4 text-sm text-gray-700 leading-relaxed shadow-sm border border-gray-100">
+                        ${msg}
+                    </div>
+                </div>
+            `;
+            chatHistory.appendChild(div);
+            lucide.createIcons();
+            scrollToBottom();
+            
+            topicInput.disabled = false;
+            sendBtn.disabled = false;
+        }
+
+        function scrollToBottom() {
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        // Status Logic
+        function showStatus(data) {
+            currentStatus.classList.remove('hidden');
+            document.getElementById('statusLabel').innerText = data.status;
+            document.getElementById('statusPercent').innerText = data.progress + '%';
+            document.getElementById('statusProgress').style.width = data.progress + '%';
+            document.getElementById('statusMsg').innerText = data.message || 'Processing...';
+        }
+
+        function hideStatus() {
+            currentStatus.classList.add('hidden');
+        }
+
+        // Artifact Logic
+        function addArtifact(artifact) {
+            emptyArtifacts.classList.add('hidden');
+            
+            const existing = document.getElementById(artifact.id);
+            if (existing) existing.remove();
+
+            const card = document.createElement('div');
+            card.id = artifact.id;
+            card.className = 'artifact-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden';
+            
+            let contentHtml = '';
+            let icon = 'file-code';
+            let typeLabel = 'JSON DSL';
+            let footer = '';
+
+            if (artifact.type === 'plan') {
+                icon = 'clipboard-list';
+                typeLabel = 'Presentation Plan';
+                const outline = artifact.content.outline || [];
+                contentHtml = `
+                    <div class="p-6 space-y-4">
+                        <h3 class="font-bold text-lg text-gray-900">${artifact.content.title}</h3>
+                        <div class="space-y-3">
+                            ${outline.map((s, i) => `
+                                <div class="flex gap-3 items-start group/item">
+                                    <span class="text-xs font-bold text-gray-300 group-hover/item:text-blue-400 transition">${i+1}</span>
+                                    <div>
+                                        <p class="text-sm font-semibold text-gray-800">${s.title}</p>
+                                        <p class="text-xs text-gray-500 mt-0.5">${s.description}</p>
+                                        <div class="flex gap-1.5 mt-2">
+                                            ${s.expectedComponents.map(c => `<span class="px-1.5 py-0.5 rounded bg-gray-100 text-[9px] text-gray-500 uppercase font-bold tracking-wider">${c}</span>`).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else if (artifact.type === 'dsl') {
+                icon = 'layout';
+                typeLabel = 'Generated Content';
+                const pages = artifact.content.pages || [];
+                contentHtml = `
+                    <div class="p-6 space-y-4">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-lg text-gray-900">${artifact.content.title}</h3>
+                            <span class="px-2 py-1 rounded bg-green-50 text-green-600 text-[10px] font-bold uppercase">${artifact.content.meta.theme}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${pages.map((p, i) => `
+                                <div class="p-3 bg-gray-50 rounded-xl border border-gray-100 flex flex-col gap-2">
+                                    <p class="text-xs font-bold text-gray-400">PAGE ${i+1}</p>
+                                    <p class="text-[11px] font-semibold text-gray-700 truncate">${p.meta.title}</p>
+                                    <div class="flex gap-1">
+                                        ${p.elements.map(e => `<div class="w-1.5 h-1.5 rounded-full ${e.type==='chart' ? 'bg-orange-400' : 'bg-blue-400'}"></div>`).join('')}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else if (artifact.type === 'pptx') {
+                icon = 'file-presentation';
+                typeLabel = 'PowerPoint File';
+                contentHtml = `
+                    <div class="p-8 flex flex-col items-center justify-center space-y-4">
+                        <div class="w-20 h-20 rounded-full bg-orange-100 flex items-center justify-center">
+                            <i data-lucide="file-presentation" class="text-orange-600 w-10 h-10"></i>
+                        </div>
+                        <div class="text-center">
+                            <p class="font-bold text-gray-900">${artifact.content.filename}</p>
+                            <p class="text-xs text-gray-500 mt-1">Ready for download</p>
+                        </div>
+                        <a href="${artifact.content.downloadUrl}" target="_blank" class="w-full flex items-center justify-center gap-2 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 transition shadow-lg shadow-orange-200">
+                            <i data-lucide="download" class="w-4 h-4"></i>
+                            Download PPTX
+                        </a>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="px-4 py-2 bg-gray-50/50 border-b flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="${icon}" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">${typeLabel}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[10px] text-gray-400 font-medium">
+                        ${artifact.version} • ${new Date(artifact.timestamp || Date.now()).toLocaleTimeString()}
+                    </div>
+                </div>
+                ${contentHtml}
+            `;
+
+            artifactsContainer.prepend(card);
+            lucide.createIcons();
+            
+            // Update stats
+            const total = artifactsContainer.children.length - (emptyArtifacts.classList.contains('hidden') ? 0 : 1);
+            document.getElementById('artifactStats').innerHTML = `
+                <span class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-md font-bold uppercase tracking-wider">${total} Artifacts Generated</span>
+            `;
+        }
+    </script>
+</body>
+</html>
