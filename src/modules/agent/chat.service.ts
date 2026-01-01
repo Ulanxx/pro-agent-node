@@ -5,6 +5,7 @@ import { AgentService } from '../agent/agent.service';
 import { Chat5StageService } from './chat-5-stage.service';
 import { ArtifactService } from './artifact.service';
 import { IntentClassifier, UserIntent } from './intent-classifier.service';
+import { AutonomousGraphService } from './graph/autonomous-graph.service';
 import { Redis } from 'ioredis';
 import { Artifact } from '../../core/dsl/types';
 import { JobStartMetaDataPayload } from 'src/shared/types/process';
@@ -21,6 +22,7 @@ export class ChatService {
     private readonly chat5StageService: Chat5StageService,
     private readonly artifactService: ArtifactService,
     private readonly intentClassifier: IntentClassifier,
+    private readonly autonomousGraphService: AutonomousGraphService,
   ) {
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
@@ -47,10 +49,17 @@ export class ChatService {
       history,
     );
 
+    // 判断是否使用自主规划模式
+    const useAutonomousPlanning = this.shouldUseAutonomousPlanning(
+      message,
+      classification,
+      history,
+    );
+
     const chatMessageId = `msg_${uuidv4()}`;
 
     this.logger.log(
-      `Using LangGraph PPT generation flow. Intent: ${classification.intent}, Target Stage: ${classification.targetStage}`,
+      `Using ${useAutonomousPlanning ? 'Autonomous Planning' : '5-Stage'} PPT generation flow. Intent: ${classification.intent}, Target Stage: ${classification.targetStage}`,
     );
 
     // 处理与 PPT 生成无关的内容
@@ -139,11 +148,31 @@ export class ChatService {
       timestamp: Date.now(),
     });
 
-    await this.chat5StageService.handle5StagePPTGeneration(
-      sessionId,
-      message,
-      chatMessageId,
-    );
+    if (useAutonomousPlanning) {
+      // 使用自主规划模式
+      const document = await this.autonomousGraphService.execute(
+        sessionId,
+        message,
+        chatMessageId,
+        {
+          history,
+          existingArtifacts: await this.getSessionArtifacts(sessionId),
+        },
+      );
+
+      if (document) {
+        this.logger.log(
+          `Autonomous planning completed successfully for session ${sessionId}`,
+        );
+      }
+    } else {
+      // 使用原有的 5 阶段流程
+      await this.chat5StageService.handle5StagePPTGeneration(
+        sessionId,
+        message,
+        chatMessageId,
+      );
+    }
   }
 
   async saveMessage(sessionId: string, message: Message) {
@@ -185,5 +214,25 @@ export class ChatService {
 
   async getSessionArtifacts(sessionId: string): Promise<Artifact[]> {
     return this.artifactService.getArtifacts(sessionId);
+  }
+
+  /**
+   * 判断是否应该使用自主规划模式
+   */
+  private shouldUseAutonomousPlanning(
+    message: string,
+    classification: any,
+    history: Message[],
+  ): boolean {
+    // 如果用户明确要求自主规划，或者历史记录为空，使用自主规划
+    const hasAutonomousKeyword =
+      message.includes('自主') ||
+      message.includes('自动') ||
+      message.includes('AI 规划') ||
+      message.includes('智能');
+
+    const isNewSession = !history || history.length === 0;
+
+    return hasAutonomousKeyword || isNewSession;
   }
 }

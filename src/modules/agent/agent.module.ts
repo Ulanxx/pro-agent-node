@@ -7,6 +7,12 @@ import { ArtifactService } from './artifact.service';
 import { SocketModule } from '../socket/socket.module';
 import { WebSearchTool } from './tools/web-search.tool';
 import { IntentClassifier } from './intent-classifier.service';
+import { PlannerService } from './planner/planner.service';
+import { TaskSchedulerService } from './scheduler/task-scheduler.service';
+import { TaskExecutorService } from './executor/task-executor.service';
+import { ReflectorService } from './reflector/reflector.service';
+import { TaskListService } from './task-list/task-list.service';
+import { AutonomousGraphService } from './graph/autonomous-graph.service';
 
 @Module({
   imports: [forwardRef(() => SocketModule)],
@@ -18,6 +24,12 @@ import { IntentClassifier } from './intent-classifier.service';
     ArtifactService,
     WebSearchTool,
     IntentClassifier,
+    PlannerService,
+    TaskSchedulerService,
+    TaskExecutorService,
+    ReflectorService,
+    TaskListService,
+    AutonomousGraphService,
   ],
   exports: [
     AgentService,
@@ -27,6 +39,12 @@ import { IntentClassifier } from './intent-classifier.service';
     ArtifactService,
     WebSearchTool,
     IntentClassifier,
+    PlannerService,
+    TaskSchedulerService,
+    TaskExecutorService,
+    ReflectorService,
+    TaskListService,
+    AutonomousGraphService,
   ],
 })
 export class AgentModule {}
