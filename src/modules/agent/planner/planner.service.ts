@@ -256,6 +256,8 @@ export class PlannerService {
           estimatedDuration: 45,
           canRetry: true,
           maxRetries: 3,
+          critical: false, // 非关键任务，失败可跳过
+          retryCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -272,6 +274,8 @@ export class PlannerService {
           estimatedDuration: 60,
           canRetry: true,
           maxRetries: 3,
+          critical: false, // 非关键任务，失败可跳过
+          retryCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -288,6 +292,8 @@ export class PlannerService {
           estimatedDuration: 90,
           canRetry: true,
           maxRetries: 3,
+          critical: false, // 非关键任务，失败可跳过
+          retryCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -304,6 +310,8 @@ export class PlannerService {
           estimatedDuration: 45,
           canRetry: true,
           maxRetries: 3,
+          critical: false, // 非关键任务，失败可跳过
+          retryCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -320,6 +328,8 @@ export class PlannerService {
           estimatedDuration: 120,
           canRetry: true,
           maxRetries: 3,
+          critical: true, // 关键任务，失败将终止流程
+          retryCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -327,11 +337,14 @@ export class PlannerService {
     ];
 
     // 构建依赖关系
-    tasks[1].dependencies = [{ taskId: tasks[0].id, condition: 'success' }];
-    tasks[2].dependencies = [{ taskId: tasks[1].id, condition: 'success' }];
-    tasks[3].dependencies = [{ taskId: tasks[2].id, condition: 'success' }];
-    tasks[4].dependencies = [{ taskId: tasks[2].id, condition: 'success' }];
+    // 注意：必须在所有任务创建完成后才能构建依赖关系，使用实际的 task ID 而非索引
+    // 任务顺序: analyze_topic (0) -> course_config (1) -> video_outline (2) -> slide_scripts (3) + theme (4) -> slides (5)
+    tasks[1].dependencies = [{ taskId: tasks[0].id, condition: 'success' }]; // course_config 依赖 analyze_topic
+    tasks[2].dependencies = [{ taskId: tasks[1].id, condition: 'success' }]; // video_outline 依赖 course_config
+    tasks[3].dependencies = [{ taskId: tasks[2].id, condition: 'success' }]; // slide_scripts 依赖 video_outline
+    tasks[4].dependencies = [{ taskId: tasks[2].id, condition: 'success' }]; // theme 依赖 video_outline
     tasks[5].dependencies = [
+      // slides 依赖 slide_scripts 和 theme（两者都必须成功）
       { taskId: tasks[3].id, condition: 'success' },
       { taskId: tasks[4].id, condition: 'success' },
     ];

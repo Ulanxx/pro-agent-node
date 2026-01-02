@@ -47,6 +47,8 @@ export interface TaskMetadata {
   requiredTools?: string[];
   canRetry?: boolean;
   maxRetries?: number;
+  critical?: boolean; // 是否为关键任务（失败将终止流程）
+  retryCount?: number; // 当前重试次数
   createdAt?: number;
   updatedAt?: number;
 }
