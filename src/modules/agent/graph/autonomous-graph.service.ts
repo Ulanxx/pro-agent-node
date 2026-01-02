@@ -140,7 +140,13 @@ export class AutonomousGraphService {
     }
 
     // 3. 检查当前任务的执行状态
-    if (currentTask.status === TaskStatus.FAILED) {
+    if (currentTask.status === TaskStatus.COMPLETED) {
+      this.logger.log(`Task ${currentTask.id} completed, checking for more tasks`);
+      // 继续检查是否有更多任务（在步骤 4 中处理）
+    } else if (currentTask.status === TaskStatus.SKIPPED) {
+      this.logger.log(`Task ${currentTask.id} was skipped, checking for more tasks`);
+      // 继续检查是否有更多任务（在步骤 4 中处理）
+    } else if (currentTask.status === TaskStatus.FAILED) {
       const isCritical = this.isCriticalTask(currentTask);
       const maxRetries = currentTask.metadata?.maxRetries || 3;
       const retryCount = currentTask.metadata?.retryCount || 0;
@@ -154,13 +160,21 @@ export class AutonomousGraphService {
         this.logger.warn(
           `Non-critical task ${currentTask.id} failed after ${retryCount} retries, skipping`,
         );
-        // 非关键任务失败，继续执行其他任务
+        // 非关键任务失败，继续执行其他任务（在步骤 4 中处理）
       } else {
         this.logger.log(
           `Task ${currentTask.id} will be retried (${retryCount}/${maxRetries}), continuing`,
         );
         return 'continue';
       }
+    } else if (currentTask.status === TaskStatus.PENDING) {
+      // 任务被重置为 PENDING，需要重新调度
+      this.logger.log(`Task ${currentTask.id} is pending for retry, continuing`);
+      return 'continue';
+    } else if (currentTask.status === TaskStatus.READY) {
+      // 任务已准备好执行
+      this.logger.log(`Task ${currentTask.id} is ready, continuing`);
+      return 'continue';
     }
 
     // 4. 检查是否还有待执行的任务
@@ -501,14 +515,17 @@ export class AutonomousGraphService {
         if (taskInList) {
           taskInList.metadata = taskInList.metadata || {};
           taskInList.metadata.retryCount = newRetryCount;
-          taskInList.status = TaskStatus.PENDING; // 重置为 PENDING 以便重新调度
+          // 关键修复：重试时设置为 READY 而不是 PENDING
+          // 因为任务的依赖已经满足（它之前已经在执行了）
+          // getNextTask 只会选择 READY 状态的任务
+          taskInList.status = TaskStatus.READY;
           taskInList.metadata.updatedAt = Date.now();
         }
 
         this.taskSchedulerService.updateTaskStatus(
           taskList!,
           currentTask.id,
-          TaskStatus.PENDING, // 关键：重置为 PENDING
+          TaskStatus.READY, // 关键：设置为 READY 以便重新调度
           undefined,
           errorMessage,
         );
@@ -521,6 +538,7 @@ export class AutonomousGraphService {
             error: errorMessage,
           },
           taskList, // 返回更新后的 taskList
+          currentTask: taskInList, // 关键：返回更新后的任务对象，确保下游节点看到正确的状态
           currentStage: 'retrying',
         };
       } else if (!isCritical) {
@@ -529,7 +547,13 @@ export class AutonomousGraphService {
           `Task ${currentTask.id} skipped after ${maxRetries} retries (non-critical)`,
         );
 
-        currentTask.status = TaskStatus.SKIPPED;
+        // 更新 taskList 中的任务状态
+        const taskInList = taskList!.tasks.find(t => t.id === currentTask.id);
+        if (taskInList) {
+          taskInList.status = TaskStatus.SKIPPED;
+          taskInList.metadata = taskInList.metadata || {};
+          taskInList.metadata.updatedAt = Date.now();
+        }
 
         this.taskSchedulerService.updateTaskStatus(
           taskList!,
@@ -546,7 +570,9 @@ export class AutonomousGraphService {
             success: false,
             error: errorMessage,
           },
-          currentStage: 'executing', // 继续执行后续任务
+          taskList, // 返回更新后的 taskList
+          currentTask: taskInList, // 返回更新后的任务对象（已设置为 SKIPPED）
+          currentStage: 'executing',
         };
       } else {
         // 达到最大重试次数，且是关键任务，终止流程
@@ -554,7 +580,13 @@ export class AutonomousGraphService {
           `Critical task ${currentTask.id} failed after ${maxRetries} retries. Aborting execution.`,
         );
 
-        currentTask.status = TaskStatus.FAILED;
+        // 更新 taskList 中的任务状态
+        const taskInList = taskList!.tasks.find(t => t.id === currentTask.id);
+        if (taskInList) {
+          taskInList.status = TaskStatus.FAILED;
+          taskInList.metadata = taskInList.metadata || {};
+          taskInList.metadata.updatedAt = Date.now();
+        }
 
         this.taskSchedulerService.updateTaskStatus(
           taskList!,
@@ -571,6 +603,8 @@ export class AutonomousGraphService {
             success: false,
             error: errorMessage,
           },
+          taskList, // 返回更新后的 taskList
+          currentTask: taskInList, // 返回更新后的任务对象（已设置为 FAILED）
           currentStage: 'failed',
         };
       }
