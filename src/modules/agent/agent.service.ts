@@ -1,3 +1,25 @@
+/**
+ * Agent 服务
+ *
+ * 该服务是 Pro-Agent 项目的核心服务，负责协调 PPT 生成的各个阶段。
+ *
+ * 主要功能：
+ * - 分析用户需求
+ * - 生成课程配置
+ * - 生成视频大纲
+ * - 生成 PPT 脚本
+ * - 生成主题风格
+ * - 生成幻灯片 HTML
+ * - 执行网络搜索
+ *
+ * 该服务使用 OpenAI API（或兼容的 API）来生成内容，并将结果保存到数据库和存储服务。
+ *
+ * 环境变量：
+ * - OPENAI_API_KEY: OpenAI API 密钥
+ * - OPENAI_BASEURL: OpenAI API 基础 URL（用于兼容其他 API）
+ * - OPENAI_MODEL: 使用的模型名称，默认为 google/gemini-3-flash-preview
+ */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
@@ -22,6 +44,10 @@ import { ApplicationStatus } from '../database/entities/application.entity';
 import { ArtifactType } from '../database/entities/artifact.entity';
 import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * 状态更新回调函数类型
+ * 用于在 PPT 生成过程中更新进度状态
+ */
 type StatusUpdateCallback = (
   status:
     | 'analyzing'
@@ -33,31 +59,37 @@ type StatusUpdateCallback = (
     | 'slide_script'
     | 'theme_generation'
     | 'generating_slide',
-  progress: number,
-  message: string,
-  data?: any,
+  progress: number, // 进度百分比（0-100）
+  message: string, // 状态消息
+  data?: any, // 附加数据
 ) => Promise<void> | void;
 
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
-  private analysisModel: ChatOpenAI | undefined;
+
+  // AI 模型实例
+  private analysisModel: ChatOpenAI | undefined; // 需求分析模型
   private courseConfigModel:
     | { invoke: (p: any) => Promise<CourseConfig> }
-    | undefined;
+    | undefined; // 课程配置生成模型
   private videoOutlineModel:
     | { invoke: (p: any) => Promise<VideoOutline> }
-    | undefined;
+    | undefined; // 视频大纲生成模型
   private slideScriptModel:
     | { invoke: (p: any) => Promise<SlideScript[]> }
-    | undefined;
+    | undefined; // PPT 脚本生成模型
   private themeModel:
     | { invoke: (p: any) => Promise<PresentationTheme> }
-    | undefined;
+    | undefined; // 主题生成模型
   private slidePageModel:
     | { invoke: (p: any) => Promise<SlideHtml> }
-    | undefined;
+    | undefined; // 幻灯片生成模型
 
+  /**
+   * 构造函数
+   * 初始化 AI 模型实例
+   */
   constructor(
     private readonly webSearchTool: WebSearchTool,
     private readonly applicationService: ApplicationService,
@@ -68,10 +100,11 @@ export class AgentService {
     const modelName =
       process.env.OPENAI_MODEL || 'google/gemini-3-flash-preview';
 
+    // 如果配置了 API 密钥，则初始化 AI 模型
     if (apiKey) {
       const baseModel = new ChatOpenAI({
         modelName: modelName,
-        temperature: 0.7,
+        temperature: 0.7, // 温度参数，控制输出的随机性
         openAIApiKey: apiKey,
         configuration: {
           baseURL: baseURL,
@@ -80,6 +113,8 @@ export class AgentService {
           },
         },
       });
+
+      // 为不同的生成任务创建结构化输出模型
       this.analysisModel = baseModel;
       this.courseConfigModel =
         baseModel.withStructuredOutput(CourseConfigSchema);
@@ -459,7 +494,7 @@ export class AgentService {
       });
       // TODO: 也可以通过 Socket 推送进度更新
       this.logger.log(
-        `Application ${applicationId} status updated to ${status}, progress: ${progress}%`,
+        `Application ${applicationId} status updated to ${status}, progress: ${progress}%${message ? `, message: ${message}` : ''}`,
       );
     } catch (error) {
       this.logger.error(

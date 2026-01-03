@@ -1,29 +1,30 @@
-export interface UserMessage {
-  role: 'user';
+import { JobStartMetaDataPayload } from './process';
+
+export interface BaseMessage {
   content: string;
+  metadata?: JobStartMetaDataPayload;
   timestamp: number;
+  status: 'in_progress' | 'completed' | 'error';
+}
+export interface UserMessage extends BaseMessage {
+  role: 'user';
 }
 
-export interface AssistantChatMessage {
+export interface AssistantChatMessage extends BaseMessage {
   id: string;
   role: 'assistant';
   kind: 'chat';
-  content: string;
-  timestamp: number;
 }
 
-export interface AssistantToolMessage {
+export interface AssistantToolMessage extends BaseMessage {
   id: string;
   role: 'assistant';
   kind: 'tool';
-  status: 'in_progress' | 'completed' | 'error';
   toolName: string;
   title?: string;
-  content: string;
   progressText?: string;
   parentMessageId?: string;
   artifactIds?: string[];
-  timestamp: number;
 }
 
 export interface ToolMessagePatch {

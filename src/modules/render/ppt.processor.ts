@@ -1,12 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service';
 import { RenderService } from '../render/render.service';
 import { SocketGateway } from '../socket/socket.gateway';
 import { ArtifactService } from '../agent/artifact.service';
-import { Artifact } from '../../core/dsl/types';
 
 @Processor('ppt-generation')
 export class PptProcessor extends WorkerHost {

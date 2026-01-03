@@ -1,3 +1,22 @@
+/**
+ * Planner 服务
+ *
+ * 该服务负责规划 PPT 生成任务，根据用户需求生成任务列表。
+ *
+ * 主要功能：
+ * - 根据用户需求生成初始任务列表
+ * - 在执行过程中动态添加新任务
+ * - 优化现有任务
+ * - 提供回退任务列表（当 AI 规划失败时）
+ *
+ * 该服务使用 AI 模型来智能规划任务，但也提供了预定义的任务模板作为回退方案。
+ *
+ * 环境变量：
+ * - OPENAI_API_KEY: OpenAI API 密钥
+ * - OPENAI_BASEURL: OpenAI API 基础 URL
+ * - OPENAI_MODEL: 使用的模型名称
+ */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,19 +36,24 @@ import { TaskSchema, TaskListSchema } from '../../../core/dsl/task.types';
 @Injectable()
 export class PlannerService {
   private readonly logger = new Logger(PlannerService.name);
-  private planningModel: { invoke: (p: any) => Promise<TaskList> } | undefined;
-  private taskModel: { invoke: (p: any) => Promise<Task> } | undefined;
+  private planningModel: { invoke: (p: any) => Promise<TaskList> } | undefined; // 任务列表生成模型
+  private taskModel: { invoke: (p: any) => Promise<Task> } | undefined; // 单个任务生成模型
 
+  /**
+   * 构造函数
+   * 初始化 AI 模型实例
+   */
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
     const baseURL = process.env.OPENAI_BASEURL;
     const modelName =
       process.env.OPENAI_MODEL || 'google/gemini-3-flash-preview';
 
+    // 如果配置了 API 密钥，则初始化 AI 模型
     if (apiKey) {
       const baseModel = new ChatOpenAI({
         modelName,
-        temperature: 0.7,
+        temperature: 0.7, // 温度参数，控制输出的随机性
         openAIApiKey: apiKey,
         configuration: {
           baseURL,
@@ -67,7 +91,7 @@ export class PlannerService {
 
     if (!this.planningModel) {
       // Fallback: 使用预定义的任务模板
-      return this.createFallbackTaskList(sessionId, topic, context);
+      return this.createFallbackTaskList(sessionId, topic);
     }
 
     try {
@@ -110,7 +134,7 @@ export class PlannerService {
     } catch (error) {
       this.logger.error(`Error planning tasks: ${error}`);
       // Fallback to predefined tasks
-      return this.createFallbackTaskList(sessionId, topic, context);
+      return this.createFallbackTaskList(sessionId, topic);
     }
   }
 
@@ -221,15 +245,7 @@ export class PlannerService {
    * 创建回退任务列表
    * 当 AI 规划失败时使用预定义的任务模板
    */
-  private createFallbackTaskList(
-    sessionId: string,
-    topic: string,
-    context: {
-      history: any[];
-      existingArtifacts: any[];
-      refinementPrompt?: string;
-    },
-  ): TaskList {
+  private createFallbackTaskList(sessionId: string, topic: string): TaskList {
     this.logger.warn('Using fallback task list');
 
     const tasks: Task[] = [

@@ -44,12 +44,15 @@ export class ChatService {
     message: string,
     metaData: JobStartMetaDataPayload,
   ) {
-    this.logger.log(`Handling message for session ${sessionId}: ${message}`);
+    this.logger.log(
+      `Handling message for session ${sessionId}: ${message}, metadata: ${JSON.stringify(metaData, null, 2)}`,
+    );
 
     await this.saveMessage(sessionId, {
       role: 'user',
       content: message,
-      timestamp: Date.now(),
+      status: 'completed',
+      metadata: metaData,
     });
 
     const history = await this.getSessionHistory(sessionId);
@@ -228,7 +231,7 @@ export class ChatService {
                 : {}),
             }
           : {},
-      timestamp: message.timestamp,
+      timestamp: Date.now(),
     });
 
     await this.messageRepository.save(messageEntity);
