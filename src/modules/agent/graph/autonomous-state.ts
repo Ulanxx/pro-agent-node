@@ -14,6 +14,7 @@ export const AutonomousAgentState = Annotation.Root({
   sessionId: Annotation<string>(),
   topic: Annotation<string>(),
   chatMessageId: Annotation<string>(),
+  applicationId: Annotation<string>(), // 应用ID，用于关联MySQL中的任务和artifacts
 
   // 任务列表
   taskList: Annotation<TaskList>(),

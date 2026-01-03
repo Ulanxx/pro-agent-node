@@ -7,12 +7,14 @@ import { ReflectorService } from '../reflector/reflector.service';
 import { TaskListService } from '../task-list/task-list.service';
 import { ArtifactService } from '../artifact.service';
 import { SocketGateway } from '../../socket/socket.gateway';
+import { TaskService } from '../../application/task.service';
 import {
   AutonomousAgentState,
   AutonomousAgentStateType,
 } from './autonomous-state';
 import { Task, TaskStatus, TaskType } from '../../../core/dsl/task.types';
 import { PptHtmlDocument } from '../../../core/dsl/types';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AutonomousGraphService {
@@ -27,6 +29,8 @@ export class AutonomousGraphService {
     private readonly artifactService: ArtifactService,
     @Inject(forwardRef(() => SocketGateway))
     private readonly socketGateway: SocketGateway,
+    @Inject(forwardRef(() => TaskService))
+    private readonly taskService: TaskService,
   ) {}
 
   /**
@@ -74,10 +78,14 @@ export class AutonomousGraphService {
       history: any[];
       existingArtifacts: any[];
       refinementPrompt?: string;
+      applicationId?: string; // 新增：应用ID，用于关联任务
     },
   ): Promise<PptHtmlDocument | null> {
     const graph = this.createGraph();
-    const config = { configurable: { thread_id: sessionId } };
+    const config = {
+      configurable: { thread_id: sessionId },
+      recursionLimit: 100,
+    };
 
     const initialState: Partial<AutonomousAgentStateType> = {
       sessionId,
@@ -86,6 +94,7 @@ export class AutonomousGraphService {
       history: context.history || [],
       artifacts: context.existingArtifacts || [],
       refinementPrompt: context.refinementPrompt,
+      applicationId: context.applicationId, // 传递 applicationId
       currentStage: 'planning',
     };
 
@@ -96,7 +105,9 @@ export class AutonomousGraphService {
     try {
       const result = await graph.invoke(initialState, config);
       // 从 artifacts 中查找最终的 PPT 文档
-      const finalArtifact = result.artifacts?.find((a) => a.type === 'ppt_html_doc');
+      const finalArtifact = result.artifacts?.find(
+        (a) => a.type === 'ppt_html_doc',
+      );
       return finalArtifact?.content || null;
     } catch (error) {
       this.logger.error(`Autonomous planning failed: ${error}`);
@@ -111,25 +122,39 @@ export class AutonomousGraphService {
     const reflection = state.reflection;
     const currentTask = state.currentTask;
 
-    // 1. 如果没有当前任务，检查是否有待执行任务
-    if (!currentTask) {
-      this.logger.log('No current task, checking for pending tasks');
-
+    if (
+      !currentTask ||
+      currentTask.status === TaskStatus.COMPLETED ||
+      currentTask.status === TaskStatus.SKIPPED
+    ) {
       if (state.taskList) {
-        const hasPendingTasks = state.taskList.tasks.some(
-          (t) =>
-            t.status === TaskStatus.PENDING ||
-            t.status === TaskStatus.READY ||
-            t.status === TaskStatus.IN_PROGRESS,
-        );
+        const nextTask = this.taskSchedulerService.getNextTask(state.taskList);
+        if (nextTask) {
+          // 检查下一个任务的依赖和 artifacts
+          const dependenciesSatisfied = this.checkDependenciesSatisfied(
+            nextTask,
+            state.taskList.tasks,
+          );
+          const artifactsReady = this.checkArtifactsReady(
+            nextTask,
+            state.artifacts || [],
+          );
 
-        if (hasPendingTasks) {
-          this.logger.log('Found pending tasks, continuing execution');
-          return 'continue';
+          if (dependenciesSatisfied && artifactsReady) {
+            this.logger.log(
+              `Found ready task ${nextTask.id}, continuing execution`,
+            );
+            return 'continue';
+          } else {
+            this.logger.warn(
+              `Next task ${nextTask.id} exists but dependencies or artifacts not ready. Dependencies: ${dependenciesSatisfied}, Artifacts: ${artifactsReady}`,
+            );
+            return 'end';
+          }
         }
       }
 
-      this.logger.log('No pending tasks, ending execution');
+      this.logger.log('No ready tasks found, ending execution');
       return 'end';
     }
 
@@ -139,14 +164,8 @@ export class AutonomousGraphService {
       return 'continue';
     }
 
-    // 3. 检查当前任务的执行状态
-    if (currentTask.status === TaskStatus.COMPLETED) {
-      this.logger.log(`Task ${currentTask.id} completed, checking for more tasks`);
-      // 继续检查是否有更多任务（在步骤 4 中处理）
-    } else if (currentTask.status === TaskStatus.SKIPPED) {
-      this.logger.log(`Task ${currentTask.id} was skipped, checking for more tasks`);
-      // 继续检查是否有更多任务（在步骤 4 中处理）
-    } else if (currentTask.status === TaskStatus.FAILED) {
+    // 3. 检查当前任务的执行状态（失败、重试、Pending等）
+    if (currentTask.status === TaskStatus.FAILED) {
       const isCritical = this.isCriticalTask(currentTask);
       const maxRetries = currentTask.metadata?.maxRetries || 3;
       const retryCount = currentTask.metadata?.retryCount || 0;
@@ -169,7 +188,9 @@ export class AutonomousGraphService {
       }
     } else if (currentTask.status === TaskStatus.PENDING) {
       // 任务被重置为 PENDING，需要重新调度
-      this.logger.log(`Task ${currentTask.id} is pending for retry, continuing`);
+      this.logger.log(
+        `Task ${currentTask.id} is pending for retry, continuing`,
+      );
       return 'continue';
     } else if (currentTask.status === TaskStatus.READY) {
       // 任务已准备好执行
@@ -203,7 +224,10 @@ export class AutonomousGraphService {
           }
 
           // 6. 检查依赖任务的 artifacts 是否存在
-          const artifactsReady = this.checkArtifactsReady(nextTask, state.artifacts || []);
+          const artifactsReady = this.checkArtifactsReady(
+            nextTask,
+            state.artifacts || [],
+          );
 
           if (!artifactsReady) {
             this.logger.warn(
@@ -212,7 +236,9 @@ export class AutonomousGraphService {
             return 'end';
           }
 
-          this.logger.log(`Next task ${nextTask.id} is ready, continuing execution`);
+          this.logger.log(
+            `Next task ${nextTask.id} is ready, continuing execution`,
+          );
           return 'continue';
         }
       }
@@ -302,23 +328,48 @@ export class AutonomousGraphService {
    * 规划节点：生成任务列表
    */
   private async plannerNode(state: AutonomousAgentStateType) {
-    const { sessionId, topic, history, artifacts, refinementPrompt } = state;
+    const {
+      sessionId,
+      topic,
+      history,
+      artifacts,
+      refinementPrompt,
+      applicationId,
+    } = state;
 
     this.logger.log(`Planner node executing for session ${sessionId}`);
 
     try {
-      const taskList = await this.plannerService.planTasks(
-        sessionId,
-        topic,
-        {
-          history: history || [],
-          existingArtifacts: artifacts || [],
-          refinementPrompt,
-        },
-      );
+      const taskList = await this.plannerService.planTasks(sessionId, topic, {
+        history: history || [],
+        existingArtifacts: artifacts || [],
+        refinementPrompt,
+      });
 
-      // 保存任务列表
+      // 保存任务列表到 Redis
       await this.taskListService.saveTaskList(taskList);
+
+      // 如果有 applicationId，同时保存到 MySQL
+      if (applicationId) {
+        for (const task of taskList.tasks) {
+          try {
+            await this.taskService.create(
+              applicationId,
+              task.description || task.type,
+              task.description,
+              task.type,
+              undefined, // parentTaskId - 顶层任务没有父任务
+            );
+            this.logger.log(
+              `Task ${task.id} saved to MySQL for application ${applicationId}`,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to save task ${task.id} to MySQL: ${error}`,
+            );
+          }
+        }
+      }
 
       // 初始化任务状态
       this.taskSchedulerService.initializeTaskList(taskList);
@@ -409,7 +460,14 @@ export class AutonomousGraphService {
    * 执行节点：执行当前任务（支持重试和跳过）
    */
   private async executorNode(state: AutonomousAgentStateType) {
-    const { sessionId, topic, taskList, currentTask, artifacts, chatMessageId } = state;
+    const {
+      sessionId,
+      topic,
+      taskList,
+      currentTask,
+      artifacts,
+      chatMessageId,
+    } = state;
 
     if (!currentTask) {
       this.logger.warn('No current task to execute');
@@ -437,17 +495,16 @@ export class AutonomousGraphService {
         sessionId,
         topic,
         artifacts: artifacts || [],
-        taskList: taskList!,
+        taskList: taskList,
         chatMessageId,
         refinementPrompt: state.refinementPrompt,
       };
 
-      const executionResult =
-        await this.taskExecutorService.executeTask(
-          sessionId,
-          currentTask,
-          executionContext,
-        );
+      const executionResult = await this.taskExecutorService.executeTask(
+        sessionId,
+        currentTask,
+        executionContext,
+      );
 
       // 更新任务状态
       const status = executionResult.success
@@ -455,7 +512,7 @@ export class AutonomousGraphService {
         : TaskStatus.FAILED;
 
       this.taskSchedulerService.updateTaskStatus(
-        taskList!,
+        taskList,
         currentTask.id,
         status,
         executionResult.result,
@@ -463,7 +520,7 @@ export class AutonomousGraphService {
       );
 
       // 保存更新后的任务列表
-      await this.taskListService.updateTaskList(taskList!);
+      await this.taskListService.updateTaskList(taskList);
 
       this.logger.log(
         `Executor node completed: task ${currentTask.id} ${status}`,
@@ -497,7 +554,8 @@ export class AutonomousGraphService {
         currentStage: 'executing',
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Executor node failed for task ${currentTask.id}: ${errorMessage}`,
       );
@@ -511,7 +569,7 @@ export class AutonomousGraphService {
         );
 
         // 关键修复：在 taskList.tasks 中找到对应的任务并更新状态
-        const taskInList = taskList!.tasks.find(t => t.id === currentTask.id);
+        const taskInList = taskList.tasks.find((t) => t.id === currentTask.id);
         if (taskInList) {
           taskInList.metadata = taskInList.metadata || {};
           taskInList.metadata.retryCount = newRetryCount;
@@ -523,14 +581,14 @@ export class AutonomousGraphService {
         }
 
         this.taskSchedulerService.updateTaskStatus(
-          taskList!,
+          taskList,
           currentTask.id,
           TaskStatus.READY, // 关键：设置为 READY 以便重新调度
           undefined,
           errorMessage,
         );
 
-        await this.taskListService.updateTaskList(taskList!);
+        await this.taskListService.updateTaskList(taskList);
 
         return {
           executionResult: {
@@ -548,7 +606,7 @@ export class AutonomousGraphService {
         );
 
         // 更新 taskList 中的任务状态
-        const taskInList = taskList!.tasks.find(t => t.id === currentTask.id);
+        const taskInList = taskList.tasks.find((t) => t.id === currentTask.id);
         if (taskInList) {
           taskInList.status = TaskStatus.SKIPPED;
           taskInList.metadata = taskInList.metadata || {};
@@ -556,14 +614,14 @@ export class AutonomousGraphService {
         }
 
         this.taskSchedulerService.updateTaskStatus(
-          taskList!,
+          taskList,
           currentTask.id,
           TaskStatus.SKIPPED,
           undefined,
           errorMessage,
         );
 
-        await this.taskListService.updateTaskList(taskList!);
+        await this.taskListService.updateTaskList(taskList);
 
         return {
           executionResult: {
@@ -581,7 +639,7 @@ export class AutonomousGraphService {
         );
 
         // 更新 taskList 中的任务状态
-        const taskInList = taskList!.tasks.find(t => t.id === currentTask.id);
+        const taskInList = taskList.tasks.find((t) => t.id === currentTask.id);
         if (taskInList) {
           taskInList.status = TaskStatus.FAILED;
           taskInList.metadata = taskInList.metadata || {};
@@ -589,14 +647,14 @@ export class AutonomousGraphService {
         }
 
         this.taskSchedulerService.updateTaskStatus(
-          taskList!,
+          taskList,
           currentTask.id,
           TaskStatus.FAILED,
           undefined,
           errorMessage,
         );
 
-        await this.taskListService.updateTaskList(taskList!);
+        await this.taskListService.updateTaskList(taskList);
 
         return {
           executionResult: {
@@ -615,8 +673,14 @@ export class AutonomousGraphService {
    * 反思节点：评估执行结果并决定下一步
    */
   private async reflectorNode(state: AutonomousAgentStateType) {
-    const { taskList, currentTask, executionResult, sessionId, topic, artifacts } =
-      state;
+    const {
+      taskList,
+      currentTask,
+      executionResult,
+      sessionId,
+      topic,
+      artifacts,
+    } = state;
 
     if (!currentTask || !taskList) {
       this.logger.warn('No task to reflect on');
@@ -644,10 +708,10 @@ export class AutonomousGraphService {
       // 如果需要新任务，添加到任务列表
       if (reflection.needsNewTasks && reflection.newTaskSuggestions) {
         const newTaskIds: string[] = [];
-        
+
         for (const taskSuggestion of reflection.newTaskSuggestions) {
           const newTask: Task = {
-            id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            id: `task_${uuidv4()}_${Math.random().toString(36).substr(2, 9)}`,
             type: taskSuggestion.type as any,
             description: taskSuggestion.description || '',
             status: TaskStatus.PENDING,
@@ -667,12 +731,17 @@ export class AutonomousGraphService {
 
         // 检查新任务的依赖是否满足，如果满足则设置为 READY
         for (const taskId of newTaskIds) {
-          const task = taskList.tasks.find(t => t.id === taskId);
+          const task = taskList.tasks.find((t) => t.id === taskId);
           if (task && task.status === TaskStatus.PENDING) {
-            const dependenciesSatisfied = this.checkDependenciesSatisfied(task, taskList.tasks);
+            const dependenciesSatisfied = this.checkDependenciesSatisfied(
+              task,
+              taskList.tasks,
+            );
             if (dependenciesSatisfied) {
               task.status = TaskStatus.READY;
-              this.logger.log(`New task ${taskId} is now READY (dependencies satisfied)`);
+              this.logger.log(
+                `New task ${taskId} is now READY (dependencies satisfied)`,
+              );
             }
           }
         }
@@ -694,9 +763,7 @@ export class AutonomousGraphService {
 
       await this.taskListService.updateTaskList(taskList);
 
-      this.logger.log(
-        `Reflector node completed: ${reflection.reason}`,
-      );
+      this.logger.log(`Reflector node completed: ${reflection.reason}`);
 
       return {
         reflection,

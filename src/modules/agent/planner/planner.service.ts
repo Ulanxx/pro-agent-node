@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskList, TaskType, TaskStatus } from '../../../core/dsl/task.types';
+import {
+  Task,
+  TaskList,
+  TaskType,
+  TaskStatus,
+} from '../../../core/dsl/task.types';
 import {
   TASK_PLANNING_PROMPT,
   DYNAMIC_TASK_GENERATION_PROMPT,
@@ -29,7 +34,6 @@ export class PlannerService {
         configuration: {
           baseURL,
           defaultHeaders: {
-            'HTTP-Referer': 'http://localhost:3000',
             'X-Title': 'Pro-Agent PPT Generator',
           },
         },
@@ -41,7 +45,9 @@ export class PlannerService {
       // 创建单个任务生成模型
       this.taskModel = baseModel.withStructuredOutput(TaskSchema);
     } else {
-      this.logger.warn('OPENAI_API_KEY not found, planning will use fallback logic');
+      this.logger.warn(
+        'OPENAI_API_KEY not found, planning will use fallback logic',
+      );
     }
   }
 
@@ -125,7 +131,9 @@ export class PlannerService {
 
     if (!this.taskModel) {
       // Fallback: 不添加新任务
-      this.logger.warn('Task model not initialized, skipping dynamic task generation');
+      this.logger.warn(
+        'Task model not initialized, skipping dynamic task generation',
+      );
       return [];
     }
 
@@ -171,10 +179,7 @@ export class PlannerService {
   /**
    * 优化现有任务
    */
-  async refineTask(
-    task: Task,
-    feedback: string,
-  ): Promise<Task> {
+  async refineTask(task: Task, feedback: string): Promise<Task> {
     this.logger.log(`Refining task ${task.id} with feedback: ${feedback}`);
 
     if (!this.taskModel) {

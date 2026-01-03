@@ -135,12 +135,31 @@
         const emptyArtifacts = document.getElementById('emptyArtifacts');
         
         let sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        let currentMessageDiv = null;
+        let currentMessageContent = null;
 
         // Socket Events
         socket.on('connect', () => {
             const status = document.getElementById('connectionStatus');
             status.innerHTML = '<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>Connected';
             status.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 text-green-600 text-xs font-medium';
+            
+            // 初始化聊天
+            socket.emit('chat:init', { sessionId });
+        });
+
+        socket.on('chat:init:response', (data) => {
+            console.log('Chat Init:', data);
+            if (data.status === 'success' && data.messages) {
+                chatHistory.innerHTML = '';
+                data.messages.forEach(msg => {
+                    if (msg.role === 'user') {
+                        addUserMessage(msg.content);
+                    } else {
+                        addBotMessage(msg.content, msg.id);
+                    }
+                });
+            }
         });
 
         socket.on('disconnect', () => {
@@ -154,15 +173,68 @@
             showStatus(data);
         });
 
-        socket.on('artifact:update', (data) => {
-            console.log('Artifact Update:', data);
-            addArtifact(data);
+        // 消息开始（流式）
+        socket.on('message:start', (data) => {
+            console.log('Message Start:', data);
+            currentMessageDiv = createBotMessageShell(data.id);
+            currentMessageContent = currentMessageDiv.querySelector('.message-content');
+            currentMessageContent.innerHTML = '';
+            scrollToBottom();
+        });
+
+        // 消息分片（流式）
+        socket.on('message:chunk', (data) => {
+            if (currentMessageContent) {
+                currentMessageContent.innerHTML += data.chunk;
+                scrollToBottom();
+            }
+        });
+
+        // 工具调用开始
+        socket.on('tool:start', (data) => {
+            console.log('Tool Start:', data);
+            addToolIndicator(data);
+            showStatus({
+                status: 'Running Tool',
+                progress: 50,
+                message: `Executing ${data.toolName}...`
+            });
+        });
+
+        // 工具调用更新/完成
+        socket.on('tool:update', (data) => {
+            console.log('Tool Update:', data);
+            updateToolIndicator(data);
+            if (data.status === 'completed') {
+                hideStatus();
+            }
+        });
+
+        // 产物生成
+        socket.on('tool:artifact', (data) => {
+            console.log('Tool Artifact:', data);
+            addArtifact(data.artifact);
+        });
+
+        socket.on('artifact:created', (data) => {
+            console.log('Artifact Created:', data);
+            addArtifact({
+                id: data.artifactId,
+                type: data.type,
+                content: {
+                    title: data.title,
+                    downloadUrl: data.storageUrl,
+                    filename: data.title
+                },
+                timestamp: data.createdAt
+            });
         });
 
         socket.on('completion', (data) => {
             console.log('Completion:', data);
             hideStatus();
-            addBotMessage(data.success ? '演示文稿生成完成！你可以在右侧预览产物。' : '抱歉，生成过程中出现了错误：' + data.error);
+            topicInput.disabled = false;
+            sendBtn.disabled = false;
         });
 
         // Chat Logic
@@ -175,7 +247,13 @@
             topicInput.disabled = true;
             sendBtn.disabled = true;
 
-            socket.emit('chat:send', { message, sessionId });
+            socket.emit('chat:send', { 
+                message, 
+                sessionId,
+                metadata: {
+                    description: message
+                }
+            });
         }
 
         topicInput.addEventListener('keydown', (e) => {
@@ -189,9 +267,9 @@
             const div = document.createElement('div');
             div.className = 'flex gap-4 justify-end';
             div.innerHTML = `
-                <div class="space-y-1 text-right">
+                <div class="space-y-1 text-right max-w-[80%]">
                     <p class="text-sm font-semibold text-gray-900">You</p>
-                    <div class="bg-black rounded-2xl rounded-tr-none p-4 text-sm text-white leading-relaxed shadow-md inline-block max-w-[80%] text-left">
+                    <div class="bg-black rounded-2xl rounded-tr-none p-4 text-sm text-white leading-relaxed shadow-md text-left break-words">
                         ${msg}
                     </div>
                 </div>
@@ -200,26 +278,82 @@
             scrollToBottom();
         }
 
-        function addBotMessage(msg) {
+        function createBotMessageShell(id) {
             const div = document.createElement('div');
+            div.id = id;
             div.className = 'flex gap-4';
             div.innerHTML = `
                 <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                     <i data-lucide="bot" class="text-blue-600 w-5 h-5"></i>
                 </div>
-                <div class="space-y-1">
+                <div class="space-y-1 flex-1">
                     <p class="text-sm font-semibold text-gray-900">AnyGen Agent</p>
-                    <div class="bg-gray-50 rounded-2xl rounded-tl-none p-4 text-sm text-gray-700 leading-relaxed shadow-sm border border-gray-100">
-                        ${msg}
+                    <div class="message-content bg-gray-50 rounded-2xl rounded-tl-none p-4 text-sm text-gray-700 leading-relaxed shadow-sm border border-gray-100 break-words">
+                        <div class="flex items-center gap-2">
+                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                            <div class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                        </div>
                     </div>
+                    <div class="tool-indicators space-y-2 mt-2"></div>
                 </div>
             `;
             chatHistory.appendChild(div);
             lucide.createIcons();
+            return div;
+        }
+
+        function addBotMessage(msg, id) {
+            const div = createBotMessageShell(id);
+            div.querySelector('.message-content').innerHTML = msg;
             scrollToBottom();
+        }
+
+        function addToolIndicator(data) {
+            const container = currentMessageDiv ? currentMessageDiv.querySelector('.tool-indicators') : null;
+            if (!container) return;
+
+            const toolDiv = document.createElement('div');
+            toolDiv.id = `tool-${data.id}`;
+            toolDiv.className = 'flex items-center gap-3 px-3 py-2 bg-white border border-gray-200 rounded-xl shadow-sm animate-in fade-in slide-in-from-left-2';
+            toolDiv.innerHTML = `
+                <div class="tool-icon w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <i data-lucide="wrench" class="w-3.5 h-3.5 text-blue-600"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-[11px] font-bold text-gray-900 truncate uppercase tracking-tight">${data.toolName}</p>
+                    <p class="text-[10px] text-gray-500 truncate">${data.content || 'Executing...'}</p>
+                </div>
+                <div class="tool-status">
+                    <div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+            `;
+            container.appendChild(toolDiv);
+            lucide.createIcons();
+            scrollToBottom();
+        }
+
+        function updateToolIndicator(data) {
+            const toolDiv = document.getElementById(`tool-${data.id}`);
+            if (!toolDiv) return;
+
+            const statusIcon = toolDiv.querySelector('.tool-status');
+            const toolIcon = toolDiv.querySelector('.tool-icon');
             
-            topicInput.disabled = false;
-            sendBtn.disabled = false;
+            if (data.status === 'completed') {
+                statusIcon.innerHTML = '<i data-lucide="check-circle-2" class="w-4 h-4 text-green-500"></i>';
+                toolIcon.className = 'tool-icon w-6 h-6 rounded-lg bg-green-50 flex items-center justify-center';
+                toolIcon.innerHTML = '<i data-lucide="wrench" class="w-3.5 h-3.5 text-green-600"></i>';
+            } else if (data.status === 'failed') {
+                statusIcon.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4 text-red-500"></i>';
+                toolIcon.className = 'tool-icon w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center';
+                toolIcon.innerHTML = '<i data-lucide="wrench" class="w-3.5 h-3.5 text-red-600"></i>';
+            }
+            
+            if (data.content) {
+                toolDiv.querySelector('p.text-gray-500').innerText = data.content;
+            }
+            lucide.createIcons();
         }
 
         function scrollToBottom() {

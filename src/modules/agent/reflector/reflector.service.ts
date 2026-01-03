@@ -29,7 +29,6 @@ export class ReflectorService {
         configuration: {
           baseURL,
           defaultHeaders: {
-            'HTTP-Referer': 'http://localhost:3000',
             'X-Title': 'Pro-Agent PPT Generator',
           },
         },

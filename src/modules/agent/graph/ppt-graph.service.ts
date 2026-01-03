@@ -33,25 +33,84 @@ export class PptGraphService {
    * @param entryStage 入口阶段，决定从哪个节点开始执行
    */
   createGraph(entryStage: TargetStage = TargetStage.ANALYSIS) {
-    const workflow = new StateGraph(AgentState)
-      .addNode('analysisNode', (state) => this.analysisNode(state))
-      .addNode('courseConfigNode', (state) => this.courseConfigNode(state))
-      .addNode('videoOutlineNode', (state) => this.videoOutlineNode(state))
-      .addNode('slideScriptsNode', (state) => this.slideScriptsNode(state))
-      .addNode('themeNode', (state) => this.themeNode(state))
-      .addNode('slidesNode', (state) => this.slidesNode(state));
+    const workflow = new StateGraph(AgentState);
 
-    // 根据入口阶段设置起始节点
+    // 根据入口阶段，只添加需要的节点
+    // 总是添加 slidesNode（最终节点）
+    workflow.addNode('slidesNode', (state) => this.slidesNode(state), {
+      ends: [END],
+    });
+
+    // 根据入口阶段，从后向前添加节点
+    if (entryStage !== TargetStage.SLIDES) {
+      workflow.addNode('themeNode', (state) => this.themeNode(state), {
+        ends: ['slidesNode'],
+      });
+    }
+
+    if (entryStage !== TargetStage.THEME && entryStage !== TargetStage.SLIDES) {
+      workflow.addNode(
+        'slideScriptsNode',
+        (state) => this.slideScriptsNode(state),
+        {
+          ends: ['themeNode'],
+        },
+      );
+    }
+
+    if (
+      entryStage !== TargetStage.SLIDE_SCRIPTS &&
+      entryStage !== TargetStage.THEME &&
+      entryStage !== TargetStage.SLIDES
+    ) {
+      workflow.addNode(
+        'videoOutlineNode',
+        (state) => this.videoOutlineNode(state),
+        {
+          ends: ['slideScriptsNode'],
+        },
+      );
+    }
+
+    if (
+      entryStage !== TargetStage.VIDEO_OUTLINE &&
+      entryStage !== TargetStage.SLIDE_SCRIPTS &&
+      entryStage !== TargetStage.THEME &&
+      entryStage !== TargetStage.SLIDES
+    ) {
+      workflow.addNode(
+        'courseConfigNode',
+        (state) => this.courseConfigNode(state),
+        {
+          ends: ['videoOutlineNode'],
+        },
+      );
+    }
+
+    if (
+      entryStage !== TargetStage.COURSE_CONFIG &&
+      entryStage !== TargetStage.VIDEO_OUTLINE &&
+      entryStage !== TargetStage.SLIDE_SCRIPTS &&
+      entryStage !== TargetStage.THEME &&
+      entryStage !== TargetStage.SLIDES
+    ) {
+      workflow.addNode('analysisNode', (state) => this.analysisNode(state), {
+        ends: ['courseConfigNode'],
+      });
+    }
+
+    // 设置起始节点
     const entryNode = this.getEntryNode(entryStage);
-
-    // 构建图的边
+    // @ts-expect-error - TypeScript 类型推断问题，运行时正确
     workflow.addEdge(START, entryNode);
 
-    // 添加后续边的逻辑
+    // 添加边
     if (entryStage !== TargetStage.SLIDES) {
+      // @ts-expect-error - TypeScript 类型推断问题，运行时正确
       workflow.addEdge('themeNode', 'slidesNode');
     }
     if (entryStage !== TargetStage.THEME && entryStage !== TargetStage.SLIDES) {
+      // @ts-expect-error - TypeScript 类型推断问题，运行时正确
       workflow.addEdge('slideScriptsNode', 'themeNode');
     }
     if (
@@ -59,6 +118,7 @@ export class PptGraphService {
       entryStage !== TargetStage.THEME &&
       entryStage !== TargetStage.SLIDES
     ) {
+      // @ts-expect-error - TypeScript 类型推断问题，运行时正确
       workflow.addEdge('videoOutlineNode', 'slideScriptsNode');
     }
     if (
@@ -67,6 +127,7 @@ export class PptGraphService {
       entryStage !== TargetStage.THEME &&
       entryStage !== TargetStage.SLIDES
     ) {
+      // @ts-expect-error - TypeScript 类型推断问题，运行时正确
       workflow.addEdge('courseConfigNode', 'videoOutlineNode');
     }
     if (
@@ -76,9 +137,11 @@ export class PptGraphService {
       entryStage !== TargetStage.THEME &&
       entryStage !== TargetStage.SLIDES
     ) {
+      // @ts-expect-error - TypeScript 类型推断问题，运行时正确
       workflow.addEdge('analysisNode', 'courseConfigNode');
     }
 
+    // @ts-expect-error - TypeScript 类型推断问题，运行时正确
     workflow.addEdge('slidesNode', END);
 
     return workflow.compile({

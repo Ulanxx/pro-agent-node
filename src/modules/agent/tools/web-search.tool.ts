@@ -67,14 +67,16 @@ export class WebSearchTool {
         });
 
         const result = (await response.json()) as BochaSearchResponse;
-        
+
         // 添加详细日志用于调试
         this.logger.log(`Bocha API response status: ${response.status}`);
         this.logger.log(`Bocha API response: ${JSON.stringify(result)}`);
-        
+
         const webPages = result.data?.webPages?.value || [];
-        this.logger.log(`Extracted ${webPages.length} results from API response`);
-        
+        this.logger.log(
+          `Extracted ${webPages.length} results from API response`,
+        );
+
         return webPages.map((r) => ({
           title: r.name,
           url: r.url,

@@ -53,9 +53,7 @@ export class TaskSchedulerService {
     task.error = error;
     task.metadata.updatedAt = Date.now();
 
-    this.logger.log(
-      `Task ${taskId} status updated: ${oldStatus} -> ${status}`,
-    );
+    this.logger.log(`Task ${taskId} status updated: ${oldStatus} -> ${status}`);
 
     // 更新任务列表状态
     taskList.updatedAt = Date.now();

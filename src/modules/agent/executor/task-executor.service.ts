@@ -438,10 +438,7 @@ export class TaskExecutorService {
         result = await this.executeVideoOutlineTask(targetTask, refinedContext);
         break;
       case TaskType.GENERATE_SLIDE_SCRIPTS:
-        result = await this.executeSlideScriptsTask(
-          targetTask,
-          refinedContext,
-        );
+        result = await this.executeSlideScriptsTask(targetTask, refinedContext);
         break;
       case TaskType.GENERATE_THEME:
         result = await this.executeThemeTask(targetTask, refinedContext);

@@ -3,6 +3,7 @@ import { SocketGateway } from '../socket/socket.gateway';
 import { PptGraphService } from './graph/ppt-graph.service';
 import { PptHtmlDocument } from '../../core/dsl/types';
 import { TargetStage } from './intent-classifier.service';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class Chat5StageService {
@@ -33,7 +34,7 @@ export class Chat5StageService {
 
       this.socketGateway.emitCompletion(sessionId, {
         success: true,
-        finalArtifactId: `art_dsl_${Date.now()}`,
+        finalArtifactId: `art_dsl_${uuidv4()}`,
       });
 
       return document;

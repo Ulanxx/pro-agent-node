@@ -31,7 +31,7 @@ async planTasks(sessionId: string, topic: string, context: PlanningContext): Pro
 
   // 添加搜索任务
   const searchTask: Task = {
-    id: `task_search_${Date.now()}`,
+    id: `task_search_${uuidv4()}`,
     type: TaskType.SEARCH_WEB,
     description: `搜索 "${topic}" 相关的最新信息`,
     status: TaskStatus.PENDING,
@@ -49,7 +49,6 @@ async planTasks(sessionId: string, topic: string, context: PlanningContext): Pro
   tasks.push(searchTask);
 
   return {
-    id: `tasklist_${Date.now()}`,
     sessionId,
     topic,
     status: 'planning',

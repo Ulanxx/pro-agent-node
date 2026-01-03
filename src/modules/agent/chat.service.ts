@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { SocketGateway } from '../socket/socket.gateway';
 import { AgentService } from '../agent/agent.service';
@@ -10,6 +12,11 @@ import { Redis } from 'ioredis';
 import { Artifact } from '../../core/dsl/types';
 import { JobStartMetaDataPayload } from 'src/shared/types/process';
 import { Message, AssistantToolMessage } from '../../shared/types/message';
+import {
+  Message as MessageEntity,
+  MessageRole,
+  MessageKind,
+} from '../database/entities/message.entity';
 
 @Injectable()
 export class ChatService {
@@ -17,6 +24,8 @@ export class ChatService {
   private readonly redis: Redis;
 
   constructor(
+    @InjectRepository(MessageEntity)
+    private readonly messageRepository: Repository<MessageEntity>,
     private readonly socketGateway: SocketGateway,
     private readonly agentService: AgentService,
     private readonly chat5StageService: Chat5StageService,
@@ -126,29 +135,27 @@ export class ChatService {
       return;
     }
 
-    const welcomeMessage =
-      '我将使用 5 阶段流程为您生成专业的教学 PPT：课程配置 → 视频大纲 → PPT 脚本 → 主题风格 → 逐页生成。';
-
-    this.socketGateway.emitMessageStart(sessionId, {
-      id: chatMessageId,
-      role: 'assistant',
-      content: '',
-    });
-
-    this.socketGateway.emitMessageChunk(sessionId, {
-      id: chatMessageId,
-      chunk: welcomeMessage,
-    });
-
-    await this.saveMessage(sessionId, {
-      id: chatMessageId,
-      role: 'assistant',
-      kind: 'chat',
-      content: welcomeMessage,
-      timestamp: Date.now(),
-    });
-
     if (useAutonomousPlanning) {
+      const welcomeMessage = '我将使用自主规划模式为您生成专业的教学 PPT。';
+
+      this.socketGateway.emitMessageStart(sessionId, {
+        id: chatMessageId,
+        role: 'assistant',
+        content: '',
+      });
+
+      this.socketGateway.emitMessageChunk(sessionId, {
+        id: chatMessageId,
+        chunk: welcomeMessage,
+      });
+
+      await this.saveMessage(sessionId, {
+        id: chatMessageId,
+        role: 'assistant',
+        kind: 'chat',
+        content: welcomeMessage,
+        timestamp: Date.now(),
+      });
       // 使用自主规划模式
       const document = await this.autonomousGraphService.execute(
         sessionId,
@@ -166,6 +173,27 @@ export class ChatService {
         );
       }
     } else {
+      const welcomeMessage =
+        '我将使用 5 阶段流程为您生成专业的教学 PPT：课程配置 → 视频大纲 → PPT 脚本 → 主题风格 → 逐页生成。';
+
+      this.socketGateway.emitMessageStart(sessionId, {
+        id: chatMessageId,
+        role: 'assistant',
+        content: '',
+      });
+
+      this.socketGateway.emitMessageChunk(sessionId, {
+        id: chatMessageId,
+        chunk: welcomeMessage,
+      });
+
+      await this.saveMessage(sessionId, {
+        id: chatMessageId,
+        role: 'assistant',
+        kind: 'chat',
+        content: welcomeMessage,
+        timestamp: Date.now(),
+      });
       // 使用原有的 5 阶段流程
       await this.chat5StageService.handle5StagePPTGeneration(
         sessionId,
@@ -179,6 +207,31 @@ export class ChatService {
     const key = `chat:history:${sessionId}`;
     await this.redis.rpush(key, JSON.stringify(message));
     await this.redis.expire(key, 86400);
+
+    // 同时保存到 MySQL
+    const messageEntity = this.messageRepository.create({
+      applicationId: sessionId,
+      role: message.role === 'user' ? MessageRole.USER : MessageRole.ASSISTANT,
+      kind:
+        'kind' in message
+          ? message.kind === 'tool'
+            ? MessageKind.TOOL
+            : MessageKind.CHAT
+          : MessageKind.CHAT,
+      content: message.content,
+      metadata:
+        'id' in message
+          ? {
+              id: message.id,
+              ...('metadata' in message && message.metadata
+                ? message.metadata
+                : {}),
+            }
+          : {},
+      timestamp: message.timestamp,
+    });
+
+    await this.messageRepository.save(messageEntity);
   }
 
   async updateToolMessage(

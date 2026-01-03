@@ -5,6 +5,7 @@ import { Chat5StageService } from './chat-5-stage.service';
 import { PptGraphService } from './graph/ppt-graph.service';
 import { ArtifactService } from './artifact.service';
 import { SocketModule } from '../socket/socket.module';
+import { ApplicationModule } from '../application/application.module';
 import { WebSearchTool } from './tools/web-search.tool';
 import { IntentClassifier } from './intent-classifier.service';
 import { PlannerService } from './planner/planner.service';
@@ -15,7 +16,10 @@ import { TaskListService } from './task-list/task-list.service';
 import { AutonomousGraphService } from './graph/autonomous-graph.service';
 
 @Module({
-  imports: [forwardRef(() => SocketModule)],
+  imports: [
+    forwardRef(() => SocketModule),
+    forwardRef(() => ApplicationModule),
+  ],
   providers: [
     AgentService,
     ChatService,

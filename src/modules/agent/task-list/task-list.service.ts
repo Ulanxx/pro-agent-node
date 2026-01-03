@@ -125,9 +125,7 @@ export class TaskListService {
     taskList.updatedAt = Date.now();
 
     await this.saveTaskList(taskList);
-    this.logger.log(
-      `${tasks.length} tasks added to session ${sessionId}`,
-    );
+    this.logger.log(`${tasks.length} tasks added to session ${sessionId}`);
   }
 
   /**

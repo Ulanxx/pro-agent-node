@@ -16,6 +16,11 @@ import {
   SlideHtmlSchema,
 } from '../../core/dsl/types';
 import { WebSearchTool, SearchResult } from './tools/web-search.tool';
+import { ApplicationService } from '../application/application.service';
+import { ArtifactService } from '../application/artifact.service';
+import { ApplicationStatus } from '../database/entities/application.entity';
+import { ArtifactType } from '../database/entities/artifact.entity';
+import { v4 as uuidv4 } from 'uuid';
 
 type StatusUpdateCallback = (
   status:
@@ -53,7 +58,11 @@ export class AgentService {
     | { invoke: (p: any) => Promise<SlideHtml> }
     | undefined;
 
-  constructor(private readonly webSearchTool: WebSearchTool) {
+  constructor(
+    private readonly webSearchTool: WebSearchTool,
+    private readonly applicationService: ApplicationService,
+    private readonly artifactService: ArtifactService,
+  ) {
     const apiKey = process.env.OPENAI_API_KEY;
     const baseURL = process.env.OPENAI_BASEURL;
     const modelName =
@@ -67,7 +76,6 @@ export class AgentService {
         configuration: {
           baseURL: baseURL,
           defaultHeaders: {
-            'HTTP-Referer': 'http://localhost:3000',
             'X-Title': 'Pro-Agent PPT Generator',
           },
         },
@@ -90,6 +98,7 @@ export class AgentService {
   async analyzeTopic(
     topic: string,
     onStatusUpdate?: StatusUpdateCallback,
+    applicationId?: string,
   ): Promise<string> {
     await onStatusUpdate?.('analyzing', 5, '正在深入解析需求...');
 
@@ -108,6 +117,23 @@ export class AgentService {
           : JSON.stringify(result.content);
 
       this.logger.log(`Requirement Analysis Completed: ${content}`);
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.REQUIREMENT_ANALYSIS,
+          '需求分析',
+          { topic, analysis: content },
+        );
+        await this.updateApplicationProgress(
+          applicationId,
+          ApplicationStatus.PROCESSING,
+          5,
+          '需求分析完成',
+        );
+      }
+
       return content;
     } catch (error: unknown) {
       const errorMessage =
@@ -122,6 +148,7 @@ export class AgentService {
     analysisContent: string,
     onStatusUpdate?: StatusUpdateCallback,
     refinementPrompt?: string,
+    applicationId?: string,
   ): Promise<CourseConfig> {
     await onStatusUpdate?.('course_config', 10, '正在生成课程配置...');
 
@@ -139,6 +166,23 @@ export class AgentService {
       });
       const result = await this.courseConfigModel.invoke(prompt);
       this.logger.log(`Course config generated: ${JSON.stringify(result)}`);
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.COURSE_CONFIG,
+          '课程配置',
+          result,
+        );
+        await this.updateApplicationProgress(
+          applicationId,
+          ApplicationStatus.PROCESSING,
+          10,
+          '课程配置生成完成',
+        );
+      }
+
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -152,6 +196,7 @@ export class AgentService {
     courseConfig: CourseConfig,
     onStatusUpdate?: StatusUpdateCallback,
     refinementPrompt?: string,
+    applicationId?: string,
   ): Promise<VideoOutline> {
     await onStatusUpdate?.('video_outline', 25, '正在生成视频大纲...');
 
@@ -168,6 +213,23 @@ export class AgentService {
       });
       const result = await this.videoOutlineModel.invoke(prompt);
       this.logger.log(`Video outline generated: ${JSON.stringify(result)}`);
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.VIDEO_OUTLINE,
+          '视频大纲',
+          result,
+        );
+        await this.updateApplicationProgress(
+          applicationId,
+          ApplicationStatus.PROCESSING,
+          25,
+          '视频大纲生成完成',
+        );
+      }
+
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -182,6 +244,7 @@ export class AgentService {
     courseConfig: CourseConfig,
     onStatusUpdate?: StatusUpdateCallback,
     refinementPrompt?: string,
+    applicationId?: string,
   ): Promise<SlideScript[]> {
     await onStatusUpdate?.('slide_script', 40, '正在生成 PPT 脚本...');
 
@@ -199,6 +262,23 @@ export class AgentService {
       });
       const result = await this.slideScriptModel.invoke(prompt);
       this.logger.log(`Slide scripts generated: ${result.length} slides`);
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.SLIDE_SCRIPTS,
+          'PPT 脚本',
+          result,
+        );
+        await this.updateApplicationProgress(
+          applicationId,
+          ApplicationStatus.PROCESSING,
+          40,
+          'PPT 脚本生成完成',
+        );
+      }
+
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -213,6 +293,7 @@ export class AgentService {
     videoOutline: VideoOutline,
     onStatusUpdate?: StatusUpdateCallback,
     refinementPrompt?: string,
+    applicationId?: string,
   ): Promise<PresentationTheme> {
     await onStatusUpdate?.('theme_generation', 55, '正在生成主题风格...');
 
@@ -230,6 +311,23 @@ export class AgentService {
       this.logger.log(
         `Presentation theme generated: ${JSON.stringify(result)}`,
       );
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.PRESENTATION_THEME,
+          '主题风格',
+          result,
+        );
+        await this.updateApplicationProgress(
+          applicationId,
+          ApplicationStatus.PROCESSING,
+          55,
+          '主题风格生成完成',
+        );
+      }
+
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -246,6 +344,7 @@ export class AgentService {
     expectedPageCount: number,
     onStatusUpdate?: StatusUpdateCallback,
     refinementPrompt?: string,
+    applicationId?: string,
   ): Promise<SlideHtml> {
     const progress = 60 + (slideScript.slideIndex / expectedPageCount) * 35;
     await onStatusUpdate?.(
@@ -277,6 +376,17 @@ export class AgentService {
       });
       const result = await this.slidePageModel.invoke(prompt);
       this.logger.log(`Slide page ${slideScript.slideIndex} generated`);
+
+      // 保存 artifact
+      if (applicationId) {
+        await this.saveArtifact(
+          applicationId,
+          ArtifactType.PPT_HTML,
+          `幻灯片 ${slideScript.slideIndex + 1}: ${slideScript.title}`,
+          result,
+        );
+      }
+
       return result;
     } catch (error: unknown) {
       const errorMessage =
@@ -294,7 +404,7 @@ export class AgentService {
       content: { query: string; results: SearchResult[] },
     ) => void,
   ): Promise<SearchResult[]> {
-    const artifactId = `art_search_${Date.now()}`;
+    const artifactId = `art_search_${uuidv4()}`;
     const results = await this.webSearchTool.search(query);
 
     if (onToolArtifact) {
@@ -305,5 +415,56 @@ export class AgentService {
     }
 
     return results;
+  }
+
+  /**
+   * 保存 artifact 到 MySQL 和 Bunny Storage
+   */
+  private async saveArtifact(
+    applicationId: string,
+    type: ArtifactType,
+    title: string,
+    content: any,
+  ): Promise<void> {
+    try {
+      await this.artifactService.create(
+        applicationId,
+        type,
+        content,
+        undefined, // file buffer (optional)
+        title,
+      );
+      this.logger.log(
+        `Artifact saved: ${type} for application ${applicationId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to save artifact: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * 更新应用状态和进度
+   */
+  private async updateApplicationProgress(
+    applicationId: string,
+    status: ApplicationStatus,
+    progress: number,
+    message?: string,
+  ): Promise<void> {
+    try {
+      await this.applicationService.updateStatus(applicationId, {
+        status,
+      });
+      // TODO: 也可以通过 Socket 推送进度更新
+      this.logger.log(
+        `Application ${applicationId} status updated to ${status}, progress: ${progress}%`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to update application status: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }
